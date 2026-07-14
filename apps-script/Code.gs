@@ -16,6 +16,13 @@ var SHEET_TRANSACTIONS = 'Transactions';
 var SHEET_SETTINGS = 'Settings';
 
 var PROJECT_HEADERS = ['ID', 'Name', 'Client', 'Budget', 'Fee', 'Version', 'Notes', 'Created'];
+
+/**
+ * The Company Overheads project has a fixed ID so the app can recognise it.
+ * Production fees from every project budget are treated as its income, and
+ * company (non-project) expenses are recorded against it.
+ */
+var OVERHEADS_ID = 'company-overheads';
 var LINE_HEADERS = ['ID', 'Project ID', 'Section', 'Item', 'Description', 'Qty', 'Rate', 'Amount', 'Order'];
 var TXN_HEADERS = [
   'Hash', 'Date', 'Description', 'Amount', 'Project ID', 'Project Name',
@@ -93,6 +100,7 @@ function withLock_(fn) {
 
 /** Everything the UI needs, in one call. */
 function getAppData() {
+  ensureOverheadsProject_();
   return {
     projects: listProjects_(),
     budgetLines: listLines_(),
@@ -102,6 +110,19 @@ function getAppData() {
 }
 
 // ---------------------------------------------------------------- Projects
+
+function ensureOverheadsProject_() {
+  var d = readRows_(SHEET_PROJECTS, PROJECT_HEADERS);
+  for (var i = 0; i < d.rows.length; i++) {
+    if (String(d.rows[i].values[d.col['ID']]) === OVERHEADS_ID) return;
+  }
+  d.sheet.appendRow(rowArray_(d.col, PROJECT_HEADERS, {
+    'ID': OVERHEADS_ID, 'Name': 'Company Overheads', 'Client': '',
+    'Budget': 0, 'Fee': 0, 'Version': '',
+    'Notes': 'Funded by production fees; holds company (non-project) expenses.',
+    'Created': new Date()
+  }));
+}
 
 function listProjects_() {
   var d = readRows_(SHEET_PROJECTS, PROJECT_HEADERS);
@@ -248,6 +269,9 @@ function updateProject(id, name, budget, notes) {
 }
 
 function deleteProject(id) {
+  if (String(id) === OVERHEADS_ID) {
+    throw new Error('The Company Overheads project can’t be deleted — it collects your production fees and company expenses.');
+  }
   return withLock_(function () {
     var p = readRows_(SHEET_PROJECTS, PROJECT_HEADERS);
     for (var i = 0; i < p.rows.length; i++) {

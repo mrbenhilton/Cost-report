@@ -395,7 +395,8 @@
   ];
   var NO_PROJECT = '__none__';
   var NEW_PROJECT = '__new__';
-  var UNBUDGETED = '__unbudgeted__';
+  var OVERAGE = '__overage__';
+  var OVERHEADS_ID = 'company-overheads';
 
   var PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
   var PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -482,6 +483,17 @@
   }
   function linesForProject(projectId) {
     return app.budgetLines.filter(function (l) { return l.projectId === projectId; });
+  }
+  function isOverheads(id) { return id === OVERHEADS_ID; }
+  function clientProjects() {
+    return app.projects.filter(function (p) { return !isOverheads(p.id); });
+  }
+  function overheadsProject() {
+    return app.projects.filter(function (p) { return isOverheads(p.id); })[0] || null;
+  }
+  /** Production fees across all project budgets = the overheads project's income. */
+  function feeIncome() {
+    return clientProjects().reduce(function (s, p) { return s + (p.fee || 0); }, 0);
   }
   function allCategories() {
     var seen = {};
@@ -835,11 +847,8 @@
     if (!budgetEditor.replaceProjectId) {
       document.getElementById('budget-upload-title').textContent = 'Add a project from a budget';
     }
-    if (!app.projects.length) {
-      host.innerHTML = '<div class="card muted">No projects yet — upload your first budget above.</div>';
-      return;
-    }
-    host.innerHTML = app.projects.map(function (p) {
+    var clients = clientProjects();
+    var html = clients.map(function (p) {
       var s = spent[p.id] || 0;
       var lineCount = linesForProject(p.id).length;
       return '<div class="card">' + projectSummaryHtml(p, s) +
@@ -852,6 +861,34 @@
         '<button class="linklike danger" onclick="removeProject(\'' + p.id + '\')">Delete</button>' +
         '</div><div id="edit-' + p.id + '"></div></div>';
     }).join('');
+    if (!clients.length) {
+      html = '<div class="card muted">No projects yet — upload your first budget above.</div>';
+    }
+    var oh = overheadsProject();
+    if (oh) html += '<div class="card">' + overheadsSummaryHtml(spent[oh.id] || 0) + '</div>';
+    host.innerHTML = html;
+  }
+
+  function overheadsSummaryHtml(spentAmt) {
+    var income = feeIncome();
+    return '<div class="proj-head"><h3>Company Overheads</h3>' +
+      '<span class="amounts">' + fmt(spentAmt) + ' spent of ' + fmt(income) + ' fee income</span></div>' +
+      '<div class="small muted">Income is the production fee from every project budget; company (non-project) expenses are recorded here.</div>' +
+      overheadsMeterHtml(spentAmt, income);
+  }
+
+  function overheadsMeterHtml(spentAmt, income) {
+    if (!income) {
+      return '<div class="meter-label small muted" style="margin-top:6px;">No fee income yet — ' + fmt(spentAmt) + ' spent</div>';
+    }
+    var pct = Math.max(0, spentAmt / income * 100);
+    var over = spentAmt > income;
+    var label = over
+      ? '<span class="over-text">⚠ Spending exceeds fee income by ' + fmt(spentAmt - income) + '</span>'
+      : Math.round(pct) + '% of fee income used · ' + fmt(income - spentAmt) + ' remaining';
+    return '<div class="meter"><div class="fill' + (over ? ' over' : '') + '" style="width:' +
+      Math.min(100, pct).toFixed(1) + '%"></div></div>' +
+      '<div class="meter-label">' + label + '</div>';
   }
 
   function projectSummaryHtml(p, s) {
@@ -1203,9 +1240,11 @@
   }
 
   function rebuildProjectSelect(sel) {
+    var oh = overheadsProject();
     sel.innerHTML =
-      app.projects.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') +
-      '<option value="' + NO_PROJECT + '">Not project-related</option>' +
+      clientProjects().map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') +
+      (oh ? '<option value="' + oh.id + '">Company Overheads (company expense)</option>' : '') +
+      '<option value="' + NO_PROJECT + '">Ignore (personal / transfer)</option>' +
       '<option value="' + NEW_PROJECT + '">＋ New project…</option>';
   }
 
@@ -1236,7 +1275,7 @@
         (l.amount ? ' (' + fmt(l.amount) + ')' : '') + '</option>';
     });
     if (currentSection !== null) html += '</optgroup>';
-    html += '<option value="' + UNBUDGETED + '">Unbudgeted / not in this budget</option>';
+    html += '<option value="' + OVERAGE + '">Overage — not in this budget</option>';
     lineSel.innerHTML = html;
     lineWrap.classList.remove('hidden');
     onReviewLineChange();
@@ -1245,7 +1284,7 @@
   function onReviewLineChange() {
     var lineSel = document.getElementById('rv-line');
     var showCategory = document.getElementById('rv-line-wrap').classList.contains('hidden') ||
-      lineSel.value === UNBUDGETED;
+      lineSel.value === OVERAGE;
     document.getElementById('rv-category-wrap').classList.toggle('hidden', !showCategory);
   }
 
@@ -1278,12 +1317,12 @@
     var lineWrap = document.getElementById('rv-line-wrap');
     if (proj && !lineWrap.classList.contains('hidden')) {
       var sel = document.getElementById('rv-line');
-      if (sel.value && sel.value !== UNBUDGETED) {
+      if (sel.value && sel.value !== OVERAGE) {
         var line = app.budgetLines.filter(function (l) { return l.id === sel.value; })[0];
         if (line) { lineId = line.id; lineName = line.item; category = line.section; }
       } else {
-        category = document.getElementById('rv-category').value.trim() || 'Unbudgeted';
-        lineName = 'Unbudgeted';
+        category = document.getElementById('rv-category').value.trim() || 'Overage';
+        lineName = 'Overage';
       }
     } else {
       category = document.getElementById('rv-category').value.trim();
@@ -1351,8 +1390,9 @@
   // ------------------------------------------------------------ report tab
   function renderReport() {
     var spent = spentByProject();
+    var clients = clientProjects();
     var totalBudget = 0, totalSpent = 0;
-    app.projects.forEach(function (p) { totalBudget += p.budget; totalSpent += spent[p.id] || 0; });
+    clients.forEach(function (p) { totalBudget += p.budget; totalSpent += spent[p.id] || 0; });
 
     var knownIds = {};
     app.projects.forEach(function (p) { knownIds[p.id] = true; });
@@ -1367,22 +1407,27 @@
       }
     });
 
+    var oh = overheadsProject();
+    var ohSpent = oh ? (spent[oh.id] || 0) : 0;
+    var ohNet = feeIncome() - ohSpent;
     var remaining = totalBudget - totalSpent;
     document.getElementById('report-tiles').innerHTML =
-      tileHtml('Total budget', fmt(totalBudget), false) +
-      tileHtml('Total spent', fmt(totalSpent), false) +
-      tileHtml(remaining >= 0 ? 'Remaining' : 'Over budget', fmt(Math.abs(remaining)), remaining < 0);
+      tileHtml('Project budgets', fmt(totalBudget), false) +
+      tileHtml('Project spend', fmt(totalSpent), false) +
+      tileHtml(remaining >= 0 ? 'Remaining' : 'Over budget', fmt(Math.abs(remaining)), remaining < 0) +
+      tileHtml('Overheads net', fmt(ohNet), ohNet < 0);
 
     var host = document.getElementById('report-projects');
-    if (!app.projects.length && !app.transactions.length) {
+    if (!clients.length && !app.transactions.length) {
       host.innerHTML = '<div class="card muted">Nothing here yet — upload a budget to create a project, then reconcile a statement.</div>';
       document.getElementById('report-nonproject').innerHTML = '';
       return;
     }
 
-    var html = app.projects.map(function (p) {
+    var html = clients.map(function (p) {
       return projectReportCard(p.id, p, spent[p.id] || 0);
     }).join('');
+    if (oh) html += overheadsReportCard(oh, ohSpent);
     Object.keys(orphans).forEach(function (id) {
       html += projectReportCard(id, { name: orphans[id].name + ' (deleted project)', budget: 0, client: '', notes: '' }, orphans[id].total);
     });
@@ -1390,8 +1435,46 @@
 
     document.getElementById('report-nonproject').innerHTML = nonProject.count
       ? '<div class="card small muted">' + nonProject.count + ' transaction(s) totalling ' +
-        fmt(nonProject.total) + ' were marked “not project-related”.</div>'
+        fmt(nonProject.total) + ' were ignored (personal / transfers).</div>'
       : '';
+  }
+
+  function overheadsReportCard(oh, spentAmt) {
+    var txns = app.transactions.filter(function (t) { return t.projectId === oh.id; });
+    var feeRows = clientProjects().filter(function (p) { return p.fee; })
+      .map(function (p) {
+        return '<tr><td>Production fee — ' + esc(p.name) +
+          (p.version ? ' <span class="small muted">' + esc(p.version) + '</span>' : '') + '</td>' +
+          '<td class="num">' + fmt(p.fee) + '</td></tr>';
+      }).join('');
+    var incomeHtml = feeRows
+      ? '<div class="table-scroll"><table>' +
+        '<tr><th>Income</th><th class="num">Amount</th></tr>' + feeRows +
+        '<tr class="total-row"><td>Total fee income</td><td class="num">' + fmt(feeIncome()) + '</td></tr>' +
+        '</table></div>'
+      : '<div class="small muted">No production fees yet — they appear here as you upload project budgets.</div>';
+    var bars = categoryBarsHtml(txns);
+
+    var rowsHtml = txns.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; })
+      .map(function (t) {
+        return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
+          (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
+          '<td>' + esc(t.category || '') + '</td><td>' + esc(t.statement) + '</td>' +
+          '<td class="num">' + fmt(t.amount) + '</td>' +
+          '<td><button class="linklike danger" title="Delete this transaction" onclick="removeTxn(\'' + t.hash + '\')">✕</button></td></tr>';
+      }).join('');
+
+    return '<div class="card">' + overheadsSummaryHtml(spentAmt) +
+      '<hr class="divider">' + incomeHtml +
+      (bars ? '<hr class="divider"><div class="small muted" style="margin-bottom:6px;">Company expenses by category</div>' + bars : '') +
+      (txns.length
+        ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--accent);">' +
+          txns.length + ' expense(s) — show details</summary>' +
+          '<div class="table-scroll" style="margin-top:8px;"><table><tr><th>Date</th><th>Description</th>' +
+          '<th>Category</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
+          rowsHtml + '</table></div></details>'
+        : '<div class="small muted" style="margin-top:8px;">No company expenses recorded yet.</div>') +
+      '</div>';
   }
 
   function tileHtml(label, value, negative) {
@@ -1433,17 +1516,17 @@
   /** Budget vs actual, line by line, grouped into sections. */
   function reconciliationHtml(lines, txns) {
     var actualByLine = {};
-    var unbudgeted = {};   // category -> total
-    var unbudgetedTotal = 0;
+    var overages = {};   // category -> total
+    var overagesTotal = 0;
     var lineIds = {};
     lines.forEach(function (l) { lineIds[l.id] = true; });
     txns.forEach(function (t) {
       if (t.lineId && lineIds[t.lineId]) {
         actualByLine[t.lineId] = (actualByLine[t.lineId] || 0) + t.amount;
       } else {
-        var c = t.category || t.lineName || 'Unbudgeted';
-        unbudgeted[c] = (unbudgeted[c] || 0) + t.amount;
-        unbudgetedTotal += t.amount;
+        var c = t.category || t.lineName || 'Overage';
+        overages[c] = (overages[c] || 0) + t.amount;
+        overagesTotal += t.amount;
       }
     });
 
@@ -1476,14 +1559,14 @@
     });
     closeSection();
 
-    var unbCats = Object.keys(unbudgeted);
-    if (unbCats.length) {
-      html += '<tr class="section-row"><td colspan="4">Unbudgeted</td></tr>';
-      unbCats.sort().forEach(function (c) {
+    var overCats = Object.keys(overages);
+    if (overCats.length) {
+      html += '<tr class="section-row"><td colspan="4">Overages</td></tr>';
+      overCats.sort().forEach(function (c) {
         html += '<tr><td class="item-cell">' + esc(c) + '</td>' + numCell(0) +
-          numCell(unbudgeted[c]) + varianceCell(-unbudgeted[c]) + '</tr>';
+          numCell(overages[c]) + varianceCell(-overages[c]) + '</tr>';
       });
-      totActual += unbudgetedTotal;
+      totActual += overagesTotal;
     }
 
     html += '<tr class="total-row"><td>Total (budget lines)</td>' +

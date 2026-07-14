@@ -13,8 +13,10 @@ quote:
    against** — the categories are your own budget's sections and line items.
 3. The **Cost report** shows, per project, a full reconciliation:
    **Budgeted / Actual / Remaining for every budget line**, section
-   subtotals, unbudgeted spend flagged separately, and an overall
-   spent-vs-budget meter.
+   subtotals, overages flagged separately, and an overall
+   spent-vs-budget meter. A **Company Overheads** project is maintained
+   automatically: every budget's production fee flows into it as income,
+   and company (non-project) expenses are recorded against it.
 4. Everything is stored **directly in a Google Sheet you own**, so nothing is
    ever lost between sessions — the spreadsheet *is* the database, and you can
    always open it and see (or edit) your data.
@@ -78,8 +80,11 @@ missing lines. Lines with `TBC` amounts are kept at 0 so they still appear
 in the reconciliation.
 
 The **production fee** is included in the project's budget total but isn't a
-cost line — bank spending reconciles against the cost lines (the subtotal),
-and the fee is effectively your margin.
+cost line — bank spending reconciles against the cost lines (the subtotal).
+The fee itself is posted as **income to the Company Overheads project**, so
+your margin across all projects funds the company's own running costs. If
+you upload a revised budget with a different fee, the overheads income
+updates automatically.
 
 **Budget revisions:** every project card has *Upload new budget version*.
 Lines that keep the same section + item name keep their identity, so
@@ -95,9 +100,11 @@ version label and total update.
    handles UK & US date formats, separate money-in/money-out columns, etc.).
 4. Step through each transaction: pick the project, pick the **budget line**
    (grouped by your budget's sections), optionally add a note, **Save & next**.
-   - Costs that weren't in the budget → **Unbudgeted / not in this budget**
-     (give them a category); they're flagged separately in the report.
-   - Non-project payments → **Not project-related**.
+   - Costs that weren't in the budget → **Overage — not in this budget**
+     (give them a category); they're flagged in an *Overages* section of
+     the report.
+   - Company costs (rent, software, insurance…) → **Company Overheads**.
+   - Personal payments or transfers between accounts → **Ignore**.
    - Unsure? **Skip for now** — it will be offered again next time you upload
      that statement.
 
@@ -109,8 +116,12 @@ duplicates — already-recorded transactions are silently skipped.
 
 Per project: an overall budget meter, then the reconciliation — every budget
 line with **Budgeted, Actual and Remaining**, subtotals per section,
-over-spent lines and unbudgeted items flagged with ⚠, and the full
-transaction list (with delete, in case something was mis-assigned).
+over-spent lines and overages flagged with ⚠, and the full transaction list
+(with delete, in case something was mis-assigned).
+
+The **Company Overheads** card lists the production-fee income from every
+project, company expenses by category, and the net position — also shown as
+an *Overheads net* tile at the top of the report.
 
 ## Where the data lives
 
