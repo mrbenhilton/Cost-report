@@ -299,8 +299,8 @@
       </div>
       <div class="row" style="margin-top:10px; align-items:center;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
-          <input type="checkbox" id="map-skip-income" checked style="width:auto;">
-          Skip incoming payments (only review money going out)
+          <input type="checkbox" id="map-skip-income" style="width:auto;">
+          Skip incoming payments (don’t review income)
         </label>
         <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-skip-transfers" checked style="width:auto;">
@@ -331,7 +331,7 @@
         </div>
         <div class="txn-desc" id="rv-desc"></div>
         <div class="small muted hidden" id="rv-note" style="margin:-8px 0 14px;"></div>
-        <div class="row">
+        <div class="row" id="rv-project-row">
           <div class="grow">
             <label for="rv-project">Which project?</label>
             <select id="rv-project" onchange="onReviewProjectChange()"></select>
@@ -339,6 +339,14 @@
           <div class="grow" id="rv-line-wrap">
             <label for="rv-line">Budget line</label>
             <select id="rv-line" onchange="onReviewLineChange()"></select>
+          </div>
+        </div>
+        <div id="rv-income" class="hidden">
+          <label>This is an incoming payment — which project(s) is it income for?</label>
+          <div id="rv-income-rows"></div>
+          <div style="margin-top:6px;">
+            <button class="linklike" onclick="addIncomeSplitRow()">＋ Split across another project</button>
+            <span class="small" id="rv-income-remaining"></span>
           </div>
         </div>
         <div id="rv-newproject" class="row hidden" style="margin-top:10px;">
@@ -405,6 +413,8 @@
   var NEW_PROJECT = '__new__';
   var OVERAGE = '__overage__';
   var OVERHEADS_ID = 'company-overheads';
+  /** Line-ID marker for income entries so they never mix with spend. */
+  var INCOME_LINE = '__income__';
 
   var PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
   var PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -481,13 +491,25 @@
     return sign + app.settings.currency + Math.abs(n).toLocaleString(undefined,
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function isIncomeTxn(t) { return t.lineId === INCOME_LINE; }
+
   function spentByProject() {
     var spent = {};
     app.transactions.forEach(function (t) {
-      if (!t.projectId) return;
+      if (!t.projectId || isIncomeTxn(t)) return;
       spent[t.projectId] = (spent[t.projectId] || 0) + t.amount;
     });
     return spent;
+  }
+
+  /** Money received per project (income entries are stored with negative amounts). */
+  function incomeByProject() {
+    var received = {};
+    app.transactions.forEach(function (t) {
+      if (!t.projectId || !isIncomeTxn(t)) return;
+      received[t.projectId] = (received[t.projectId] || 0) - t.amount;
+    });
+    return received;
   }
   function linesForProject(projectId) {
     return app.budgetLines.filter(function (l) { return l.projectId === projectId; });
@@ -502,6 +524,19 @@
   /** Production fees across all project budgets = the overheads project's income. */
   function feeIncome() {
     return clientProjects().reduce(function (s, p) { return s + (p.fee || 0); }, 0);
+  }
+
+  /** Income entries allocated to Company Overheads (bank interest etc.). */
+  function otherOverheadsIncome() {
+    var oh = overheadsProject();
+    if (!oh) return 0;
+    return app.transactions.reduce(function (s, t) {
+      return s + (isIncomeTxn(t) && t.projectId === oh.id ? -t.amount : 0);
+    }, 0);
+  }
+
+  function totalOverheadsIncome() {
+    return feeIncome() + otherOverheadsIncome();
   }
   function allCategories() {
     var seen = {};
@@ -880,10 +915,10 @@
   }
 
   function overheadsSummaryHtml(spentAmt) {
-    var income = feeIncome();
+    var income = totalOverheadsIncome();
     return '<div class="proj-head"><h3>Company Overheads</h3>' +
       '<span class="amounts">' + fmt(spentAmt) + ' spent of ' + fmt(income) + ' fee income</span></div>' +
-      '<div class="small muted">Income is the production fee from every project budget; company (non-project) expenses are recorded here.</div>' +
+      '<div class="small muted">Income is the production fee from every project budget (plus any other income allocated here); company (non-project) expenses are recorded here.</div>' +
       overheadsMeterHtml(spentAmt, income);
   }
 
@@ -905,10 +940,23 @@
     var sub = [];
     if (p.client) sub.push(esc(p.client));
     if (p.notes) sub.push(esc(p.notes));
+    var received = p.id ? (incomeByProject()[p.id] || 0) : 0;
+    var receivedHtml = '';
+    if (received > 0) {
+      var outstanding = p.budget - received;
+      receivedHtml = '<div class="meter-label" style="margin-top:4px;">Received ' + fmt(received) +
+        (p.budget
+          ? (outstanding > 0.005
+              ? ' of ' + fmt(p.budget) + ' · ' + fmt(outstanding) + ' still to invoice'
+              : ' — fully paid' + (outstanding < -0.005 ? ' (+' + fmt(-outstanding) + ' over the budget total)' : ''))
+          : '') +
+        '</div>';
+    }
     return '<div class="proj-head"><h3>' + esc(p.name) + '</h3>' +
       '<span class="amounts">' + fmt(s) + ' spent of ' + fmt(p.budget) + ' budget</span></div>' +
       (sub.length ? '<div class="small muted">' + sub.join(' · ') + '</div>' : '') +
-      meterHtml(s, p.budget);
+      meterHtml(s, p.budget) +
+      receivedHtml;
   }
 
   function meterHtml(spentAmt, budget) {
@@ -1265,6 +1313,7 @@
     noteEl.textContent = t.note ? 'Statement note: ' + t.note : '';
     noteEl.classList.toggle('hidden', !t.note);
     document.getElementById('rv-purpose').value = t.note || '';
+
     document.getElementById('rv-category').value = '';
     document.getElementById('rv-error').classList.add('hidden');
 
@@ -1276,7 +1325,88 @@
     rebuildProjectSelect(sel);
     if (prev && [].some.call(sel.options, function (o) { return o.value === prev; })) sel.value = prev;
     onReviewProjectChange();
+
+    // money-in → income allocation UI instead of project + budget line
+    // (after onReviewProjectChange so its category toggle can't re-show fields)
+    var isIncome = t.amount < 0;
+    document.getElementById('rv-project-row').classList.toggle('hidden', isIncome);
+    document.getElementById('rv-income').classList.toggle('hidden', !isIncome);
+    document.getElementById('rv-newproject').classList.toggle('hidden',
+      isIncome || sel.value !== NEW_PROJECT);
+    if (isIncome) {
+      document.getElementById('rv-category-wrap').classList.add('hidden');
+      document.getElementById('rv-income-rows').innerHTML = '';
+      addIncomeSplitRow(-t.amount);
+      updateIncomeRemaining();
+    }
     document.getElementById('rv-purpose').focus();
+  }
+
+  // ------------------------------------------------- income split editor
+  var incomeRowSeq = 0;
+
+  function incomePartOptionsHtml() {
+    var oh = overheadsProject();
+    return clientProjects().map(function (p) {
+      return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
+    }).join('') +
+      (oh ? '<option value="' + oh.id + '">Company Overheads (other income)</option>' : '') +
+      '<option value="' + NO_PROJECT + '">Ignore (not project income)</option>';
+  }
+
+  function addIncomeSplitRow(amount) {
+    var n = ++incomeRowSeq;
+    var div = document.createElement('div');
+    div.className = 'row income-part';
+    div.style.marginTop = '6px';
+    div.innerHTML =
+      '<div class="grow" style="flex:2;"><select class="is-proj">' + incomePartOptionsHtml() + '</select></div>' +
+      '<div class="grow"><input type="number" class="is-amt" min="0" step="0.01" value="' +
+      (amount != null ? amount.toFixed(2) : '') + '" oninput="updateIncomeRemaining()"></div>' +
+      '<div><button class="linklike danger" title="Remove this split" onclick="removeIncomeSplitRow(this)">✕</button></div>';
+    document.getElementById('rv-income-rows').appendChild(div);
+    updateIncomeRemaining();
+  }
+
+  function removeIncomeSplitRow(btn) {
+    var rows = document.querySelectorAll('#rv-income-rows .income-part');
+    if (rows.length <= 1) return;   // always keep one row
+    btn.closest('.income-part').remove();
+    updateIncomeRemaining();
+  }
+
+  function updateIncomeRemaining() {
+    var t = review.queue[review.idx];
+    if (!t || t.amount >= 0) return;
+    var total = -t.amount;
+    var allocated = 0;
+    document.querySelectorAll('#rv-income-rows .is-amt').forEach(function (input) {
+      allocated += parseFloat(input.value) || 0;
+    });
+    var remaining = Math.round((total - allocated) * 100) / 100;
+    var el = document.getElementById('rv-income-remaining');
+    if (remaining === 0) {
+      el.textContent = 'Fully allocated ✓';
+      el.style.color = 'var(--good)';
+    } else {
+      el.textContent = (remaining > 0 ? 'Unallocated: ' : 'Over-allocated by ') + fmt(Math.abs(remaining));
+      el.style.color = 'var(--critical)';
+    }
+  }
+
+  /** Reads the split rows into [{projectId, amount}]; null if invalid. */
+  function readIncomeSplit(total) {
+    var parts = [];
+    var rows = document.querySelectorAll('#rv-income-rows .income-part');
+    for (var i = 0; i < rows.length; i++) {
+      var projectId = rows[i].querySelector('.is-proj').value;
+      var amount = parseFloat(rows[i].querySelector('.is-amt').value);
+      if (isNaN(amount) || amount <= 0) return null;
+      parts.push({ projectId: projectId === NO_PROJECT ? '' : projectId, amount: amount });
+    }
+    var sum = parts.reduce(function (s, p) { return s + p.amount; }, 0);
+    if (Math.abs(sum - total) > 0.01) return null;
+    return parts.length ? parts : null;
   }
 
   function rebuildProjectSelect(sel) {
@@ -1353,6 +1483,7 @@
 
   function saveCurrentTxn() {
     var t = review.queue[review.idx];
+    if (t.amount < 0) { saveIncomeSplit(t); return; }
     var projSel = document.getElementById('rv-project').value;
     if (projSel === NEW_PROJECT) { showError('Create the new project first (or pick an existing one).'); return; }
     var proj = app.projects.filter(function (p) { return p.id === projSel; })[0];
@@ -1406,6 +1537,44 @@
     advanceReview();
   }
 
+  function saveIncomeSplit(t) {
+    var parts = readIncomeSplit(-t.amount);
+    if (!parts) {
+      var el = document.getElementById('rv-error');
+      el.textContent = 'The split needs positive amounts that add up to ' + fmt(-t.amount) + '.';
+      el.classList.remove('hidden');
+      return;
+    }
+    var purpose = document.getElementById('rv-purpose').value.trim();
+    var statement = document.getElementById('statement-label').value.trim();
+    var txns = parts.map(function (part, i) {
+      var proj = app.projects.filter(function (p) { return p.id === part.projectId; })[0];
+      return {
+        hash: i ? t.hash + '~' + i : t.hash,   // part 0 keeps the base hash so re-uploads dedupe
+        date: t.date, description: t.description,
+        amount: -part.amount,
+        projectId: proj ? proj.id : '',
+        projectName: proj ? proj.name : '',
+        lineId: INCOME_LINE, lineName: 'Income', category: 'Income',
+        purpose: purpose, statement: statement
+      };
+    });
+    var saveBtn = document.getElementById('rv-save');
+    var skipBtn = document.getElementById('rv-skip');
+    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    run('saveTransactions', txns).then(function () {
+      txns.forEach(function (x) { app.transactions.push(x); });
+      review.saved++;
+      advanceReview();
+    }).catch(function (e) {
+      var el = document.getElementById('rv-error');
+      el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
+      el.classList.remove('hidden');
+    }).finally(function () {
+      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
+    });
+  }
+
   function advanceReview() {
     review.idx++;
     if (review.idx >= review.queue.length) {
@@ -1444,6 +1613,7 @@
     var orphans = {};
     var nonProject = { total: 0, count: 0 };
     app.transactions.forEach(function (t) {
+      if (isIncomeTxn(t)) return;   // income is reported separately
       if (!t.projectId) { nonProject.total += t.amount; nonProject.count++; return; }
       if (!knownIds[t.projectId]) {
         if (!orphans[t.projectId]) orphans[t.projectId] = { name: t.projectName || 'Unknown', total: 0 };
@@ -1452,14 +1622,19 @@
       }
     });
 
+    var received = incomeByProject();
+    var totalReceived = 0;
+    clients.forEach(function (p) { totalReceived += received[p.id] || 0; });
+
     var oh = overheadsProject();
     var ohSpent = oh ? (spent[oh.id] || 0) : 0;
-    var ohNet = feeIncome() - ohSpent;
+    var ohNet = totalOverheadsIncome() - ohSpent;
     var remaining = totalBudget - totalSpent;
     document.getElementById('report-tiles').innerHTML =
       tileHtml('Project budgets', fmt(totalBudget), false) +
       tileHtml('Project spend', fmt(totalSpent), false) +
       tileHtml(remaining >= 0 ? 'Remaining' : 'Over budget', fmt(Math.abs(remaining)), remaining < 0) +
+      tileHtml('Received', fmt(totalReceived), false) +
       tileHtml('Overheads net', fmt(ohNet), ohNet < 0);
 
     document.getElementById('report-statements').innerHTML = statementBreakdownHtml();
@@ -1488,21 +1663,28 @@
 
   function overheadsReportCard(oh, spentAmt) {
     var txns = app.transactions.filter(function (t) { return t.projectId === oh.id; });
+    var expenses = txns.filter(function (t) { return !isIncomeTxn(t); });
+    var otherIncome = txns.filter(isIncomeTxn);
     var feeRows = clientProjects().filter(function (p) { return p.fee; })
       .map(function (p) {
         return '<tr><td>Production fee — ' + esc(p.name) +
           (p.version ? ' <span class="small muted">' + esc(p.version) + '</span>' : '') + '</td>' +
           '<td class="num">' + fmt(p.fee) + '</td></tr>';
       }).join('');
-    var incomeHtml = feeRows
+    var otherRows = otherIncome.map(function (t) {
+      return '<tr><td>' + esc(t.description) +
+        ' <span class="small muted">' + esc(t.date) + '</span></td>' +
+        '<td class="num">' + fmt(-t.amount) + '</td></tr>';
+    }).join('');
+    var incomeHtml = (feeRows || otherRows)
       ? '<div class="table-scroll"><table>' +
-        '<tr><th>Income</th><th class="num">Amount</th></tr>' + feeRows +
-        '<tr class="total-row"><td>Total fee income</td><td class="num">' + fmt(feeIncome()) + '</td></tr>' +
+        '<tr><th>Income</th><th class="num">Amount</th></tr>' + feeRows + otherRows +
+        '<tr class="total-row"><td>Total income</td><td class="num">' + fmt(totalOverheadsIncome()) + '</td></tr>' +
         '</table></div>'
       : '<div class="small muted">No production fees yet — they appear here as you upload project budgets.</div>';
-    var bars = categoryBarsHtml(txns);
+    var bars = categoryBarsHtml(expenses);
 
-    var rowsHtml = txns.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; })
+    var rowsHtml = expenses.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; })
       .map(function (t) {
         return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
           (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
@@ -1514,9 +1696,9 @@
     return '<div class="card">' + overheadsSummaryHtml(spentAmt) +
       '<hr class="divider">' + incomeHtml +
       (bars ? '<hr class="divider"><div class="small muted" style="margin-bottom:6px;">Company expenses by category</div>' + bars : '') +
-      (txns.length
+      (expenses.length
         ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--accent);">' +
-          txns.length + ' expense(s) — show details</summary>' +
+          expenses.length + ' expense(s) — show details</summary>' +
           '<div class="table-scroll" style="margin-top:8px;"><table><tr><th>Date</th><th>Description</th>' +
           '<th>Category</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
           rowsHtml + '</table></div></details>'
@@ -1531,12 +1713,16 @@
    */
   function statementBreakdownHtml() {
     if (!app.transactions.length) return '';
-    var stmts = {};   // label -> {byProject: {name: total}, ignored, total, latestDate}
+    var stmts = {};   // label -> {byProject: {name: total}, ignored, income, total, latestDate}
     app.transactions.forEach(function (t) {
       var label = t.statement || '(no statement label)';
       var s = stmts[label];
-      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, total: 0, latestDate: '' };
+      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, income: 0, total: 0, latestDate: '' };
       if (t.date > s.latestDate) s.latestDate = t.date;
+      if (isIncomeTxn(t)) {
+        if (t.projectId) s.income += -t.amount;
+        return;
+      }
       if (!t.projectId) { s.ignored += t.amount; return; }
       var name = t.projectName || 'Unknown project';
       s.byProject[name] = (s.byProject[name] || 0) + t.amount;
@@ -1553,6 +1739,10 @@
           html += '<tr><td style="padding-left:24px;">' + esc(name) + '</td>' +
             '<td class="num">' + fmt(s.byProject[name]) + '</td></tr>';
         });
+      if (s.income) {
+        html += '<tr><td style="padding-left:24px;" class="muted">Income received</td>' +
+          '<td class="num" style="color:var(--good);">+' + fmt(s.income) + '</td></tr>';
+      }
       if (s.ignored) {
         html += '<tr><td style="padding-left:24px;" class="muted">Ignored (personal / transfers)</td>' +
           '<td class="num muted">' + fmt(s.ignored) + '</td></tr>';
@@ -1573,20 +1763,24 @@
 
   function projectReportCard(id, p, spentAmt) {
     var txns = app.transactions.filter(function (t) { return t.projectId === id; });
+    var expenses = txns.filter(function (t) { return !isIncomeTxn(t); });
     var lines = linesForProject(id);
 
     var body = lines.length
-      ? reconciliationHtml(lines, txns)
-      : categoryBarsHtml(txns);
+      ? reconciliationHtml(lines, expenses)
+      : categoryBarsHtml(expenses);
 
     var rowsHtml = txns.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; })
       .map(function (t) {
+        var income = isIncomeTxn(t);
         var assigned = t.lineName || t.category || '';
         return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
           (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
-          '<td>' + esc(assigned) + (t.lineId && t.category ? '<div class="muted">' + esc(t.category) + '</div>' : '') + '</td>' +
+          '<td>' + esc(assigned) +
+          (!income && t.lineId && t.category ? '<div class="muted">' + esc(t.category) + '</div>' : '') + '</td>' +
           '<td>' + esc(t.statement) + '</td>' +
-          '<td class="num">' + fmt(t.amount) + '</td>' +
+          '<td class="num"' + (income ? ' style="color:var(--good);"' : '') + '>' +
+          (income ? '+' + fmt(-t.amount) : fmt(t.amount)) + '</td>' +
           '<td><button class="linklike danger" title="Delete this transaction" onclick="removeTxn(\'' + t.hash + '\')">✕</button></td></tr>';
       }).join('');
 

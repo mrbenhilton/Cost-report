@@ -109,11 +109,16 @@ version label and total update.
    - A **notes/reference column** (e.g. Monzo's "Notes and #tags") is
      picked up automatically: the note is shown on each card and prefills
      the "what was this for?" field — handy when it holds invoice numbers.
-   - Card-payment **refunds** are money-in rows: untick *Skip incoming
-     payments* if you want to review them and net them against a budget
-     line (a money-in saved to a line reduces its Actual).
+   - Card-payment **refunds** are money-in rows too — they get the income
+     card; allocate them to the project they refund.
 4. Step through each transaction: pick the project, pick the **budget line**
    (grouped by your budget's sections), optionally add a note, **Save & next**.
+   **Incoming payments get an income card instead**: allocate the payment to a
+   project — or **split it across several projects** with the built-in split
+   editor (a live counter shows the unallocated remainder). Income can also go
+   to Company Overheads (e.g. bank interest) or be ignored (VAT refunds,
+   personal top-ups). Tick *Skip incoming payments* in the mapping step if you
+   don't want to review income at all.
    - Costs that weren't in the budget → **Overage — not in this budget**
      (give them a category); they're flagged in an *Overages* section of
      the report.
@@ -139,9 +144,16 @@ line with **Budgeted, Actual and Remaining**, subtotals per section,
 over-spent lines and overages flagged with ⚠, and the full transaction list
 (with delete, in case something was mis-assigned).
 
+**Income is tracked per project**: each project card shows how much has been
+received against its invoiced total (budget incl. fee) and what's still to
+invoice. A *Received* tile totals it across projects, and each statement in
+the by-statement view shows the income it brought in. Income never mixes with
+the cost reconciliation — budget-line Actuals only ever contain spend.
+
 The **Company Overheads** card lists the production-fee income from every
-project, company expenses by category, and the net position — also shown as
-an *Overheads net* tile at the top of the report.
+project (plus any other income allocated to it), company expenses by
+category, and the net position — also shown as an *Overheads net* tile at
+the top of the report.
 
 **Costs with no bank transaction** — cash, a personal card, payroll, or
 anything paid outside this bank account — can still be allocated to a budget
