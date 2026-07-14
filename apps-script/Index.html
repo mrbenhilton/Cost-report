@@ -1265,7 +1265,13 @@
       document.getElementById('rv-category-wrap').classList.remove('hidden');
       return;
     }
-    // group into optgroups by section, in budget order
+    lineSel.innerHTML = lineOptionsHtml(lines);
+    lineWrap.classList.remove('hidden');
+    onReviewLineChange();
+  }
+
+  /** Budget lines as optgroups by section (budget order), plus the Overage option. */
+  function lineOptionsHtml(lines) {
     var html = '';
     var currentSection = null;
     lines.forEach(function (l) {
@@ -1279,9 +1285,7 @@
     });
     if (currentSection !== null) html += '</optgroup>';
     html += '<option value="' + OVERAGE + '">Overage — not in this budget</option>';
-    lineSel.innerHTML = html;
-    lineWrap.classList.remove('hidden');
-    onReviewLineChange();
+    return html;
   }
 
   function onReviewLineChange() {
@@ -1479,6 +1483,7 @@
           '<th>Category</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
           rowsHtml + '</table></div></details>'
         : '<div class="small muted" style="margin-top:8px;">No company expenses recorded yet.</div>') +
+      manualExpenseButtonHtml(oh.id) +
       '</div>';
   }
 
@@ -1556,7 +1561,87 @@
           '<th>Budget line</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
           rowsHtml + '</table></div></details>'
         : '<div class="small muted" style="margin-top:8px;">No spending recorded yet.</div>') +
+      manualExpenseButtonHtml(id) +
       '</div>';
+  }
+
+  /** Shown only for projects that still exist (not deleted-project remnants). */
+  function manualExpenseButtonHtml(projectId) {
+    var exists = app.projects.some(function (p) { return p.id === projectId; });
+    if (!exists) return '';
+    return '<div style="margin-top:8px;"><button class="linklike" onclick="openManualExpense(\'' + projectId + '\')">＋ Add an expense manually (cash / paid outside this account)</button></div>' +
+      '<div id="mx-' + projectId + '"></div>';
+  }
+
+  function openManualExpense(projectId) {
+    var host = document.getElementById('mx-' + projectId);
+    if (!host) return;
+    var lines = linesForProject(projectId);
+    var today = new Date().toISOString().slice(0, 10);
+    document.getElementById('category-list').innerHTML =
+      allCategories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
+    var lineField = lines.length
+      ? '<div class="grow" style="flex:2;"><label>Budget line</label><select id="mx-line" onchange="onManualLineChange()">' +
+        lineOptionsHtml(lines) + '</select></div>'
+      : '';
+    host.innerHTML = '<hr class="divider"><div class="row">' +
+      '<div><label>Date</label><input type="date" id="mx-date" value="' + today + '"></div>' +
+      '<div class="grow" style="flex:2;"><label>Description</label><input type="text" id="mx-desc" placeholder="e.g. Director days — paid via payroll"></div>' +
+      '<div class="grow"><label>Amount</label><input type="number" id="mx-amount" min="0" step="0.01" placeholder="0.00"></div>' +
+      '</div><div class="row" style="margin-top:10px;">' + lineField +
+      '<div class="grow" id="mx-category-wrap"><label>Category</label><input type="text" id="mx-category" list="category-list" placeholder="Choose or type…"></div>' +
+      '<div class="grow" style="flex:2;"><label>Note (optional)</label><input type="text" id="mx-purpose"></div>' +
+      '</div><div style="margin-top:10px;">' +
+      '<button class="btn primary" id="mx-save" onclick="saveManualExpense(\'' + projectId + '\')">Add expense</button> ' +
+      '<button class="btn" onclick="renderReport()">Cancel</button>' +
+      '<div class="small muted" style="margin-top:6px;">For costs with no bank transaction — cash, personal card, payroll, or anything paid outside this account. Recorded under a “Manual entry” statement.</div>' +
+      '</div>';
+    onManualLineChange();
+    document.getElementById('mx-desc').focus();
+  }
+
+  function onManualLineChange() {
+    var sel = document.getElementById('mx-line');
+    var show = !sel || sel.value === OVERAGE;
+    document.getElementById('mx-category-wrap').classList.toggle('hidden', !show);
+  }
+
+  function saveManualExpense(projectId) {
+    var p = app.projects.filter(function (x) { return x.id === projectId; })[0];
+    if (!p) return;
+    var date = document.getElementById('mx-date').value;
+    var desc = document.getElementById('mx-desc').value.trim();
+    var amount = parseFloat(document.getElementById('mx-amount').value);
+    if (!date || !desc || isNaN(amount) || amount <= 0) {
+      showError('A date, description and amount are needed for a manual expense.');
+      return;
+    }
+    var lineId = '', lineName = '', category = '';
+    var sel = document.getElementById('mx-line');
+    if (sel && sel.value !== OVERAGE) {
+      var line = app.budgetLines.filter(function (l) { return l.id === sel.value; })[0];
+      if (line) { lineId = line.id; lineName = line.item; category = line.section; }
+    } else {
+      category = document.getElementById('mx-category').value.trim() || (sel ? 'Overage' : 'Other');
+      lineName = sel ? 'Overage' : '';
+    }
+    var txn = {
+      hash: 'mx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      date: date, description: desc, amount: amount,
+      projectId: p.id, projectName: p.name,
+      lineId: lineId, lineName: lineName, category: category,
+      purpose: document.getElementById('mx-purpose').value.trim(),
+      statement: 'Manual entry'
+    };
+    var btn = document.getElementById('mx-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    run('saveTransactions', [txn]).then(function () {
+      app.transactions.push(txn);
+      renderAll();
+    }).catch(function (e) {
+      showError(e.message);
+      btn.disabled = false; btn.textContent = 'Add expense';
+    });
   }
 
   /** Budget vs actual, line by line, grouped into sections. */

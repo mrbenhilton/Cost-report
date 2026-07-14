@@ -133,6 +133,13 @@ The **Company Overheads** card lists the production-fee income from every
 project, company expenses by category, and the net position — also shown as
 an *Overheads net* tile at the top of the report.
 
+**Costs with no bank transaction** — cash, a personal card, payroll, or
+anything paid outside this bank account — can still be allocated to a budget
+line: every project card in the report has **＋ Add an expense manually**.
+Manual entries are stored like any other transaction (grouped under a
+"Manual entry" statement in the by-statement view) and count toward the
+line's Actual in the reconciliation.
+
 ## Where the data lives
 
 Everything is in your Google Sheet:
