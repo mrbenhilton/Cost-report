@@ -1,16 +1,23 @@
 # Project Cost Tracker
 
-A small web app for tracking project spending against budgets:
+A small web app for reconciling project spending against the budgets you
+quote:
 
-1. **Create projects** with a budget (e.g. a film, a client job).
-2. **Upload a monthly bank statement** (CSV export from your online banking).
-3. The app walks you through **each transaction one by one** and asks what it
-   was for and which project it belongs to.
+1. **Upload a project budget** (PDF, like a FILMWORKS budget, or a CSV/text
+   export of it). The app extracts the project name, client, budget version,
+   production fee and total, and every **section and line item** — you check
+   and correct everything on screen before saving.
+2. Every month, **upload the bank statement** (CSV export from your online
+   banking). The app walks through **each transaction one by one** and asks
+   which project it belongs to and **which budget line it should reconcile
+   against** — the categories are your own budget's sections and line items.
+3. The **Cost report** shows, per project, a full reconciliation:
+   **Budgeted / Actual / Remaining for every budget line**, section
+   subtotals, unbudgeted spend flagged separately, and an overall
+   spent-vs-budget meter.
 4. Everything is stored **directly in a Google Sheet you own**, so nothing is
    ever lost between sessions — the spreadsheet *is* the database, and you can
    always open it and see (or edit) your data.
-5. The **Cost report** tab shows, per project: budget vs. spent, remaining,
-   a category breakdown, and the full transaction list.
 
 The app runs as a **Google Apps Script web app** — hosted free by Google,
 private to your Google account, no servers or API keys to manage.
@@ -19,8 +26,8 @@ private to your Google account, no servers or API keys to manage.
 
 1. **Create the spreadsheet.** Go to [sheets.new](https://sheets.new) and name
    the spreadsheet something like `Project Cost Tracker`. Leave it empty — the
-   app creates its own tabs (`Projects`, `Transactions`, `Settings`) on first
-   run.
+   app creates its own tabs (`Projects`, `Budget Lines`, `Transactions`,
+   `Settings`) on first run.
 
 2. **Open the script editor.** In that spreadsheet, choose
    **Extensions → Apps Script**. A script project opens in a new tab.
@@ -43,26 +50,67 @@ private to your Google account, no servers or API keys to manage.
    - Copy the **Web app URL** it gives you and **bookmark it** — that URL is
      your app.
 
-That's it. Open the URL, add your first project, and you're ready for your
-first statement.
+That's it. Open the URL and upload your first budget.
 
-## Monthly routine
+## Starting a project: upload its budget
 
-1. In your online banking, export the month's statement as **CSV** (most banks
-   have "Export" or "Download" → CSV on the transactions page).
-2. Open the app → **Review statement** → choose the file and give it a label
-   like `July 2026`.
-3. Check the column mapping (the app guesses the date / description / amount
-   columns and lets you correct them), then step through each transaction:
-   say what it was for, pick a category, pick the project, **Save & next**.
-   Payments that aren't project costs can be marked **Not project-related**;
-   anything you're unsure about can be **skipped** and it will be offered
-   again next time you upload that statement.
-4. Open **Cost report** for the up-to-date picture per project.
+On the **Projects** tab, choose the budget file. PDFs are read in the
+browser (the PDF reader library loads from a CDN, so this needs an internet
+connection); CSV exports and pasted text work too. The app understands
+budgets laid out like:
+
+```
+Client:  <client name>
+Project: <project name>
+Budget Version: V1 - 23/03/2026
+
+1 SECTION NAME
+Item name    description    days    rate    total
+...
+SUBTOTAL     57,100.00
+PRODUCTION FEE 8,565.00
+TOTAL        65,665.00
+```
+
+Whatever it extracts is shown in an **editable table before anything is
+saved** — fix a misread amount, rename a section, delete junk rows, or add
+missing lines. Lines with `TBC` amounts are kept at 0 so they still appear
+in the reconciliation.
+
+The **production fee** is included in the project's budget total but isn't a
+cost line — bank spending reconciles against the cost lines (the subtotal),
+and the fee is effectively your margin.
+
+**Budget revisions:** every project card has *Upload new budget version*.
+Lines that keep the same section + item name keep their identity, so
+transactions you've already reconciled stay attached to them; the amounts,
+version label and total update.
+
+## Monthly routine: reconcile the statement
+
+1. In your online banking, export the month's statement as **CSV**.
+2. Open the app → **Reconcile statement** → choose the file and give it a
+   label like `July 2026`.
+3. Check the column mapping (the app guesses date / description / amount and
+   handles UK & US date formats, separate money-in/money-out columns, etc.).
+4. Step through each transaction: pick the project, pick the **budget line**
+   (grouped by your budget's sections), optionally add a note, **Save & next**.
+   - Costs that weren't in the budget → **Unbudgeted / not in this budget**
+     (give them a category); they're flagged separately in the report.
+   - Non-project payments → **Not project-related**.
+   - Unsure? **Skip for now** — it will be offered again next time you upload
+     that statement.
 
 **Re-uploading is safe.** Every transaction gets a fingerprint (date +
 description + amount), so uploading the same statement twice never creates
 duplicates — already-recorded transactions are silently skipped.
+
+## The cost report
+
+Per project: an overall budget meter, then the reconciliation — every budget
+line with **Budgeted, Actual and Remaining**, subtotals per section,
+over-spent lines and unbudgeted items flagged with ⚠, and the full
+transaction list (with delete, in case something was mis-assigned).
 
 ## Where the data lives
 
@@ -70,30 +118,28 @@ Everything is in your Google Sheet:
 
 | Tab | Contents |
 |---|---|
-| `Projects` | one row per project: name, budget, notes |
-| `Transactions` | one row per recorded transaction: date, description, amount, project, purpose, category, statement label |
+| `Projects` | one row per project: name, client, budget total, fee, version |
+| `Budget Lines` | one row per budget line: section, item, description, amount |
+| `Transactions` | one row per recorded transaction: date, description, amount, project, budget line, note, statement label |
 | `Settings` | app settings (currency symbol) |
 
 You can open the sheet any time (there's an *Open spreadsheet* link in the
 app header), build your own pivot tables, or fix a typo directly in a cell.
-Just don't rename the tabs or the header row. To change which project a
-transaction belongs to, edit its `Project ID` / `Project Name` cells in the
-sheet (copy the ID from the `Projects` tab), or delete the row in the app's
-report view and re-upload the statement to review it again.
+Just don't rename the tabs or the header row.
 
 ## Updating the app later
 
 If the code in this repository changes, paste the new contents into the same
 two files in the script editor, then **Deploy → Manage deployments → ✏️ Edit →
 Version: New version → Deploy**. The URL stays the same and your data is
-untouched.
+untouched. New columns/tabs are added to your spreadsheet automatically.
 
 ## Repository layout
 
 ```
 apps-script/
   Code.gs          server-side code (reads/writes the Google Sheet)
-  Index.html       the web app UI
+  Index.html       the web app UI (budget parsing, reconciliation, reports)
   appsscript.json  Apps Script manifest (only needed if you deploy with clasp)
 README.md
 ```
