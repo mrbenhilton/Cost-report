@@ -295,11 +295,16 @@
         </div>
         <div class="grow hidden" id="map-debit-wrap"><label for="map-debit">Money out column</label><select id="map-debit"></select></div>
         <div class="grow hidden" id="map-credit-wrap"><label for="map-credit">Money in column</label><select id="map-credit"></select></div>
+        <div class="grow"><label for="map-notes">Notes / reference column (optional)</label><select id="map-notes"></select></div>
       </div>
       <div class="row" style="margin-top:10px; align-items:center;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-skip-income" checked style="width:auto;">
           Skip incoming payments (only review money going out)
+        </label>
+        <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+          <input type="checkbox" id="map-skip-transfers" checked style="width:auto;">
+          Skip <span id="map-transfers-count">0</span> internal transfers (pots / savings)
         </label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-has-header" checked style="width:auto;" onchange="renderMapping()">
@@ -325,6 +330,7 @@
           <span class="txn-amount" id="rv-amount"></span>
         </div>
         <div class="txn-desc" id="rv-desc"></div>
+        <div class="small muted hidden" id="rv-note" style="margin:-8px 0 14px;"></div>
         <div class="row">
           <div class="grow">
             <label for="rv-project">Which project?</label>
@@ -385,7 +391,8 @@
   var app = { projects: [], budgetLines: [], transactions: [], settings: { currency: '£' } };
   var review = {
     rows: [], filename: '', queue: [], idx: 0,
-    saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0
+    saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0,
+    skippedTransfers: 0, typeIdx: -1, transferCount: 0
   };
   var budgetEditor = { lines: [], replaceProjectId: null };
   var beTotalDirty = false;
@@ -1091,14 +1098,19 @@
     renderMapping();
   }
 
+  /** Earlier patterns win over later ones (pattern priority, not column order). */
   function guessColumn(headers, patterns) {
-    for (var i = 0; i < headers.length; i++) {
-      var h = String(headers[i]).toLowerCase();
-      for (var p = 0; p < patterns.length; p++) {
-        if (patterns[p].test(h)) return i;
+    for (var p = 0; p < patterns.length; p++) {
+      for (var i = 0; i < headers.length; i++) {
+        if (patterns[p].test(String(headers[i]).toLowerCase())) return i;
       }
     }
     return -1;
+  }
+
+  /** Internal moves between the account's own pots/spaces — not real spend. */
+  function isInternalTransfer(value) {
+    return /pot\s*transfer|internal\s*transfer/i.test(String(value || ''));
   }
 
   function renderMapping() {
@@ -1113,20 +1125,34 @@
       sel.value = String(guessIdx);
       if (sel.selectedIndex === -1) sel.selectedIndex = 0;
     }
-    var gDate = guessColumn(headers, [/date/]);
-    var gDesc = guessColumn(headers, [/desc/, /detail/, /narrat/, /memo/, /merchant/, /payee/, /reference/, /name/, /transaction/]);
+    var gDate = guessColumn(headers, [/^date$/, /date/]);
+    var gDesc = guessColumn(headers, [/^name$/, /desc/, /narrat/, /detail/, /merchant/, /payee/, /memo/, /reference/, /transaction/]);
     var gDebit = guessColumn(headers, [/debit/, /money out/, /paid out/, /withdraw/, /out\b/]);
     var gCredit = guessColumn(headers, [/credit/, /money in/, /paid in/, /deposit/, /in\b/]);
-    var gAmount = guessColumn(headers, [/amount/, /value/, /^sum$/]);
+    var gAmount = guessColumn(headers, [/^amount$/, /amount/, /value/, /^sum$/]);
+    var gNotes = guessColumn(headers, [/notes/, /note\b/, /reference/, /memo/]);
     fill('map-date', gDate === -1 ? 0 : gDate, false);
     fill('map-desc', gDesc === -1 ? Math.min(1, headers.length - 1) : gDesc, false);
     fill('map-amount', gAmount === -1 ? headers.length - 1 : gAmount, false);
     fill('map-debit', gDebit, true);
     fill('map-credit', gCredit, true);
+    fill('map-notes', gNotes, true);
     var mode = (gDebit !== -1 && gCredit !== -1 && gAmount === -1) ? 'two' : 'single';
     document.getElementById('map-amountmode').value = mode;
     renderMappingAmountFields();
     document.getElementById('map-datefmt').value = 'auto';
+
+    // internal pot/savings transfers (e.g. Monzo pots) can be skipped in bulk
+    review.typeIdx = guessColumn(headers, [/^type$/, /transaction\s*type/]);
+    var transferCount = 0;
+    if (review.typeIdx !== -1) {
+      review.rows.slice(hasHeader ? 1 : 0).forEach(function (r) {
+        if (isInternalTransfer(r[review.typeIdx])) transferCount++;
+      });
+    }
+    review.transferCount = transferCount;
+    document.getElementById('map-transfers-count').textContent = String(transferCount);
+    document.getElementById('map-skip-transfers-wrap').classList.toggle('hidden', !transferCount);
 
     var preview = review.rows.slice(0, hasHeader ? 6 : 5);
     var html = '<tr>' + headers.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr>';
@@ -1156,6 +1182,8 @@
     var creditIdx = parseInt(document.getElementById('map-credit').value, 10);
     var sign = document.getElementById('map-sign').value;
     var skipIncome = document.getElementById('map-skip-income').checked;
+    var notesIdx = parseInt(document.getElementById('map-notes').value, 10);
+    var skipTransfers = document.getElementById('map-skip-transfers').checked && review.typeIdx >= 0;
     var fmtChoice = document.getElementById('map-datefmt').value;
 
     var dataRows = review.rows.slice(hasHeader ? 1 : 0);
@@ -1169,10 +1197,12 @@
     var occ = {};
     review.queue = [];
     review.idx = 0;
-    review.saved = 0; review.skipped = 0; review.duplicates = 0; review.skippedIncome = 0;
+    review.saved = 0; review.skipped = 0; review.duplicates = 0;
+    review.skippedIncome = 0; review.skippedTransfers = 0;
     var invalid = 0;
 
     dataRows.forEach(function (r) {
+      if (skipTransfers && isInternalTransfer(r[review.typeIdx])) { review.skippedTransfers++; return; }
       var desc = String(r[descIdx] == null ? '' : r[descIdx]).trim();
       var amountOut;
       if (mode === 'two') {
@@ -1194,12 +1224,16 @@
       occ[key] = (occ[key] || 0) + 1;
       var hash = hashTxn(key + '|' + occ[key]);
       if (known[hash]) { review.duplicates++; return; }
-      review.queue.push({ hash: hash, date: date, description: desc, amount: amountOut });
+      review.queue.push({
+        hash: hash, date: date, description: desc, amount: amountOut,
+        note: notesIdx >= 0 ? String(r[notesIdx] == null ? '' : r[notesIdx]).trim() : ''
+      });
     });
 
     if (!review.queue.length) {
       var msg = 'Nothing new to review in this file.';
       if (review.duplicates) msg += ' ' + review.duplicates + ' transaction(s) were already recorded.';
+      if (review.skippedTransfers) msg += ' ' + review.skippedTransfers + ' internal transfer(s) were skipped.';
       if (review.skippedIncome) msg += ' ' + review.skippedIncome + ' incoming payment(s) were skipped.';
       if (invalid) msg += ' ' + invalid + ' row(s) couldn’t be read — check the column mapping.';
       errEl.textContent = msg;
@@ -1227,7 +1261,10 @@
     amtEl.textContent = t.amount >= 0 ? fmt(t.amount) : '+' + fmt(-t.amount) + ' in';
     amtEl.classList.toggle('credit', t.amount < 0);
     document.getElementById('rv-desc').textContent = t.description;
-    document.getElementById('rv-purpose').value = '';
+    var noteEl = document.getElementById('rv-note');
+    noteEl.textContent = t.note ? 'Statement note: ' + t.note : '';
+    noteEl.classList.toggle('hidden', !t.note);
+    document.getElementById('rv-purpose').value = t.note || '';
     document.getElementById('rv-category').value = '';
     document.getElementById('rv-error').classList.add('hidden');
 
@@ -1377,6 +1414,7 @@
       var bits = ['Recorded ' + review.saved + ' transaction(s).'];
       if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
       if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
+      if (review.skippedTransfers) bits.push(review.skippedTransfers + ' internal pot/savings transfer(s) were left out.');
       if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
       document.getElementById('review-summary').textContent = bits.join(' ');
       renderAll();
@@ -1386,7 +1424,7 @@
   }
 
   function resetReview() {
-    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0 };
+    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, skippedTransfers: 0, typeIdx: -1, transferCount: 0 };
     document.getElementById('csv-file').value = '';
     document.getElementById('review-step-map').classList.add('hidden');
     document.getElementById('review-step-cards').classList.add('hidden');

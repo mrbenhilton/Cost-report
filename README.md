@@ -102,6 +102,16 @@ version label and total update.
    label like `July 2026`.
 3. Check the column mapping (the app guesses date / description / amount and
    handles UK & US date formats, separate money-in/money-out columns, etc.).
+   Bank-specific niceties, verified against a real Monzo Business export:
+   - **Internal pot/savings transfers are skipped in bulk** — a checkbox
+     shows how many rows are pot-to-pot moves (via the statement's Type
+     column) so you never review them one by one.
+   - A **notes/reference column** (e.g. Monzo's "Notes and #tags") is
+     picked up automatically: the note is shown on each card and prefills
+     the "what was this for?" field — handy when it holds invoice numbers.
+   - Card-payment **refunds** are money-in rows: untick *Skip incoming
+     payments* if you want to review them and net them against a budget
+     line (a money-in saved to a line reduces its Actual).
 4. Step through each transaction: pick the project, pick the **budget line**
    (grouped by your budget's sections), optionally add a note, **Save & next**.
    - Costs that weren't in the budget → **Overage — not in this budget**
