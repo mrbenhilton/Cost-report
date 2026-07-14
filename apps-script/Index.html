@@ -179,12 +179,12 @@
         </div>
       </div>
       <div id="budget-parsing" class="small muted hidden" style="margin-top:8px;">Reading the budget…</div>
-      <details style="margin-top:10px;">
-        <summary class="small muted" style="cursor:pointer;">…or paste the budget as text / add a project manually</summary>
+      <details id="budget-paste-details" style="margin-top:10px;">
+        <summary class="small muted" style="cursor:pointer;">…or paste the budget from Google Sheets / add a project manually</summary>
         <div style="margin-top:8px;">
-          <label for="budget-paste">Budget text (copy-paste from Excel or the PDF)</label>
+          <label for="budget-paste">Budget cells (in Google Sheets or Excel: select the budget, copy, paste here)</label>
           <textarea id="budget-paste" rows="5" placeholder="1 PRODUCTION&#10;Camera Operator&#9;7&#9;750&#9;5250"></textarea>
-          <div style="margin-top:8px;"><button class="btn" onclick="onBudgetPaste()">Read pasted budget</button></div>
+          <div style="margin-top:8px;"><button class="btn" id="budget-paste-btn" onclick="onBudgetPaste()">Read pasted budget</button></div>
         </div>
         <hr class="divider">
         <div class="row">
@@ -626,7 +626,9 @@
         if (m[1]) meta.subtotal = parseAmount(m[1]);
         return;
       }
-      if ((m = joined.match(/fee\b[^0-9\-]*([\d,]+(?:\.\d+)?)\s*$/i))) {
+      // summary fee row ("PRODUCTION FEE 11,325.00") — anchored so a line
+      // item that merely ends in "Fee" isn't mistaken for it
+      if ((m = joined.match(/^(?:(?:production|prod\.?|service|agency|mgmt|management)\s+)?fee\b[^0-9\-]*([\d,]+(?:\.\d+)?)\s*$/i))) {
         meta.fee = parseAmount(m[1]);
         return;
       }

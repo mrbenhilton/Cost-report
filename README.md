@@ -56,10 +56,14 @@ That's it. Open the URL and upload your first budget.
 
 ## Starting a project: upload its budget
 
-On the **Projects** tab, choose the budget file. PDFs are read in the
-browser (the PDF reader library loads from a CDN, so this needs an internet
-connection); CSV exports and pasted text work too. The app understands
-budgets laid out like:
+On the **Projects** tab, choose the budget file, or — **if your budget lives
+in Google Sheets or Excel, the easiest way**: select the budget cells in the
+sheet, copy, and paste into the *paste the budget* box. The tab-separated
+cells paste cleanly, including blank columns, a DATES block, `TBC` amounts
+and note-only rows. PDFs are read in the browser too (the PDF reader library
+loads from a CDN, so this needs an internet connection), as are CSV exports.
+Screenshots/photos of a budget can't be read — copy the cells or export
+instead. The app understands budgets laid out like:
 
 ```
 Client:  <client name>
