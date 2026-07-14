@@ -374,6 +374,7 @@
   <!-- =============================== REPORT =============================== -->
   <section id="tab-report" class="hidden">
     <div class="tiles" id="report-tiles"></div>
+    <div id="report-statements"></div>
     <div id="report-projects"></div>
     <div id="report-nonproject"></div>
   </section>
@@ -1417,6 +1418,8 @@
       tileHtml(remaining >= 0 ? 'Remaining' : 'Over budget', fmt(Math.abs(remaining)), remaining < 0) +
       tileHtml('Overheads net', fmt(ohNet), ohNet < 0);
 
+    document.getElementById('report-statements').innerHTML = statementBreakdownHtml();
+
     var host = document.getElementById('report-projects');
     if (!clients.length && !app.transactions.length) {
       host.innerHTML = '<div class="card muted">Nothing here yet — upload a budget to create a project, then reconcile a statement.</div>';
@@ -1475,6 +1478,47 @@
           rowsHtml + '</table></div></details>'
         : '<div class="small muted" style="margin-top:8px;">No company expenses recorded yet.</div>') +
       '</div>';
+  }
+
+  /**
+   * Month-by-month view: each bank statement crosses all projects, so this
+   * shows how every statement's spending fanned out across them.
+   */
+  function statementBreakdownHtml() {
+    if (!app.transactions.length) return '';
+    var stmts = {};   // label -> {byProject: {name: total}, ignored, total, latestDate}
+    app.transactions.forEach(function (t) {
+      var label = t.statement || '(no statement label)';
+      var s = stmts[label];
+      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, total: 0, latestDate: '' };
+      if (t.date > s.latestDate) s.latestDate = t.date;
+      if (!t.projectId) { s.ignored += t.amount; return; }
+      var name = t.projectName || 'Unknown project';
+      s.byProject[name] = (s.byProject[name] || 0) + t.amount;
+      s.total += t.amount;
+    });
+    var labels = Object.keys(stmts).sort(function (a, b) {
+      return stmts[a].latestDate < stmts[b].latestDate ? 1 : -1;
+    });
+    var rows = labels.map(function (label) {
+      var s = stmts[label];
+      var html = '<tr class="subtotal-row"><td>' + esc(label) + '</td><td class="num">' + fmt(s.total) + '</td></tr>';
+      Object.keys(s.byProject).sort(function (a, b) { return s.byProject[b] - s.byProject[a]; })
+        .forEach(function (name) {
+          html += '<tr><td style="padding-left:24px;">' + esc(name) + '</td>' +
+            '<td class="num">' + fmt(s.byProject[name]) + '</td></tr>';
+        });
+      if (s.ignored) {
+        html += '<tr><td style="padding-left:24px;" class="muted">Ignored (personal / transfers)</td>' +
+          '<td class="num muted">' + fmt(s.ignored) + '</td></tr>';
+      }
+      return html;
+    }).join('');
+    return '<div class="card"><h2>By statement</h2>' +
+      '<p class="small muted" style="margin-top:0;">Each monthly statement crosses all projects — this is where each month’s money went.</p>' +
+      '<div class="table-scroll"><table>' +
+      '<tr><th>Statement / project</th><th class="num">Spent</th></tr>' + rows +
+      '</table></div></div>';
   }
 
   function tileHtml(label, value, negative) {

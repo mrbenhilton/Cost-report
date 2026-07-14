@@ -114,7 +114,13 @@ duplicates — already-recorded transactions are silently skipped.
 
 ## The cost report
 
-Per project: an overall budget meter, then the reconciliation — every budget
+Budgets are per project, but each monthly bank statement crosses all of
+them — so the report opens with a **By statement** breakdown showing where
+each month's money went: statement by statement, split across the projects
+(and overheads) its transactions were assigned to, with ignored
+personal/transfer items listed separately.
+
+Then per project: an overall budget meter, then the reconciliation — every budget
 line with **Budgeted, Actual and Remaining**, subtotals per section,
 over-spent lines and overages flagged with ⚠, and the full transaction list
 (with delete, in case something was mis-assigned).
