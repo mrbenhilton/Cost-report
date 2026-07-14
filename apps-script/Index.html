@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface:        #fcfcfb;
+    --ink:            #0b0b0b;
+    --ink-2:          #52514e;
+    --muted:          #898781;
+    --hairline:       #e1e0d9;
+    --border:         rgba(11, 11, 11, 0.10);
+    --accent:         #2a78d6;   /* series-1 blue: spend meters, category bars */
+    --accent-soft:    #cde2fb;
+    --good:           #006300;
+    --critical:       #d03b3b;
+    --credit:         #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:           #0d0d0d;
+      --surface:        #1a1a19;
+      --ink:            #ffffff;
+      --ink-2:          #c3c2b7;
+      --muted:          #898781;
+      --hairline:       #2c2c2a;
+      --border:         rgba(255, 255, 255, 0.10);
+      --accent:         #3987e5;
+      --accent-soft:    #184f95;
+      --good:           #0ca30c;
+      --critical:       #d03b3b;
+      --credit:         #0ca30c;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px 16px 64px; }
+
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 8px 0 4px; }
+  header h1 { font-size: 20px; margin: 0; flex: 1; }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  header a:hover { text-decoration: underline; }
+
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--hairline); margin: 8px 0 20px; }
+  nav button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 10px 14px; font: inherit; font-weight: 600; color: var(--ink-2); cursor: pointer;
+  }
+  nav button.active { color: var(--ink); border-bottom-color: var(--accent); }
+  nav button:hover { color: var(--ink); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 14px;
+  }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 15px; margin: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .grow { flex: 1; min-width: 140px; }
+
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 3px; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px; font: inherit; color: var(--ink);
+    background: var(--page); border: 1px solid var(--hairline); border-radius: 7px;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea { resize: vertical; }
+
+  button.btn {
+    font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.btn:disabled { opacity: 0.5; cursor: default; }
+  button.linklike {
+    background: none; border: none; padding: 2px 4px; font: inherit; font-size: 13px;
+    color: var(--accent); cursor: pointer;
+  }
+  button.danger { color: var(--critical); }
+
+  /* Budget meter */
+  .meter { height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; margin: 6px 0 4px; }
+  .meter .fill { height: 100%; border-radius: 4px; background: var(--accent); }
+  .meter .fill.over { background: var(--critical); }
+  .meter-label { font-size: 13px; color: var(--ink-2); }
+  .meter-label .over-text { color: var(--critical); font-weight: 600; }
+
+  /* Category breakdown bars (single hue — magnitude) */
+  .cat-row { display: grid; grid-template-columns: 140px 1fr 90px; gap: 10px; align-items: center; margin: 5px 0; }
+  .cat-name { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-bar-track { height: 10px; }
+  .cat-bar { height: 10px; border-radius: 4px; background: var(--accent); min-width: 2px; }
+  .cat-val { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Stat tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .t-label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
+  .tile .t-value { font-size: 24px; font-weight: 700; }
+  .tile .t-value.negative { color: var(--critical); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--hairline); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .table-scroll { overflow-x: auto; }
+
+  /* Review card */
+  .progress-track { height: 6px; border-radius: 3px; background: var(--hairline); margin: 8px 0 16px; }
+  .progress-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width .2s; }
+  .txn-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .txn-amount { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .txn-amount.credit { color: var(--credit); }
+  .txn-desc { font-size: 16px; margin: 4px 0 14px; word-break: break-word; }
+
+  .notice { border-left: 3px solid var(--accent); padding: 8px 12px; background: var(--surface); border-radius: 0 7px 7px 0; margin: 10px 0; font-size: 13px; color: var(--ink-2); }
+  .error-banner { border-left-color: var(--critical); }
+  .hidden { display: none !important; }
+  .divider { border: none; border-top: 1px solid var(--hairline); margin: 14px 0; }
+  #loading { text-align: center; color: var(--muted); padding: 60px 0; }
+  .proj-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .amounts { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Project Cost Tracker</h1>
+    <span>
+      <label for="currency" style="display:inline; margin-right:4px;">Currency</label>
+      <select id="currency" style="width:auto; padding:4px 6px;" onchange="onCurrencyChange()">
+        <option>£</option><option>$</option><option>€</option><option>kr</option><option>CHF </option>
+      </select>
+    </span>
+    <a href="<?= spreadsheetUrl ?>" target="_blank" rel="noopener">Open spreadsheet ↗</a>
+  </header>
+
+  <nav>
+    <button id="nav-projects" class="active" onclick="showTab('projects')">Projects</button>
+    <button id="nav-review" onclick="showTab('review')">Review statement</button>
+    <button id="nav-report" onclick="showTab('report')">Cost report</button>
+  </nav>
+
+  <div id="loading">Loading your data…</div>
+  <div id="error" class="notice error-banner hidden"></div>
+
+  <!-- ============================== PROJECTS ============================== -->
+  <section id="tab-projects" class="hidden">
+    <div class="card">
+      <h2>Add a project</h2>
+      <div class="row">
+        <div class="grow" style="flex:2;">
+          <label for="p-name">Project name</label>
+          <input type="text" id="p-name" placeholder="e.g. Autumn short film">
+        </div>
+        <div class="grow">
+          <label for="p-budget">Budget</label>
+          <input type="number" id="p-budget" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div><button class="btn primary" id="p-add" onclick="onAddProject()">Add project</button></div>
+      </div>
+      <div style="margin-top:10px;">
+        <label for="p-notes">Notes (optional)</label>
+        <input type="text" id="p-notes" placeholder="Client, dates, anything useful">
+      </div>
+    </div>
+    <div id="project-list"></div>
+  </section>
+
+  <!-- =============================== REVIEW =============================== -->
+  <section id="tab-review" class="hidden">
+
+    <div id="review-step-upload" class="card">
+      <h2>Upload a bank statement</h2>
+      <p class="small muted" style="margin-top:0;">
+        Export the statement from your online banking as a <b>CSV</b> file, then choose it here.
+        Re-uploading the same statement is safe — transactions you've already recorded are skipped automatically.
+      </p>
+      <div class="row">
+        <div class="grow">
+          <label for="csv-file">Statement CSV file</label>
+          <input type="file" id="csv-file" accept=".csv,text/csv" onchange="onFileChosen()">
+        </div>
+        <div class="grow">
+          <label for="statement-label">Statement label</label>
+          <input type="text" id="statement-label" placeholder="e.g. July 2026">
+        </div>
+      </div>
+      <details style="margin-top:10px;">
+        <summary class="small muted" style="cursor:pointer;">…or paste CSV text instead</summary>
+        <textarea id="csv-paste" rows="5" style="margin-top:8px;" placeholder="Date,Description,Amount&#10;01/07/2026,COFFEE SHOP,-4.50"></textarea>
+        <div style="margin-top:8px;"><button class="btn" onclick="onPasteCsv()">Use pasted text</button></div>
+      </details>
+    </div>
+
+    <div id="review-step-map" class="card hidden">
+      <h2>Check the columns</h2>
+      <p class="small muted" style="margin-top:0;">I've guessed which column is which — correct anything that's wrong, then start reviewing.</p>
+      <div class="row">
+        <div class="grow"><label for="map-date">Date column</label><select id="map-date"></select></div>
+        <div class="grow"><label for="map-desc">Description column</label><select id="map-desc"></select></div>
+        <div class="grow"><label for="map-datefmt">Date format</label>
+          <select id="map-datefmt">
+            <option value="auto">Auto-detect</option>
+            <option value="DMY">Day / Month / Year</option>
+            <option value="MDY">Month / Day / Year</option>
+            <option value="YMD">Year - Month - Day</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div class="grow"><label for="map-amountmode">Amount columns</label>
+          <select id="map-amountmode" onchange="renderMappingAmountFields()">
+            <option value="single">One amount column</option>
+            <option value="two">Separate “money out” / “money in” columns</option>
+          </select>
+        </div>
+        <div class="grow" id="map-single-wrap"><label for="map-amount">Amount column</label><select id="map-amount"></select></div>
+        <div class="grow" id="map-sign-wrap"><label for="map-sign">In that column…</label>
+          <select id="map-sign">
+            <option value="negout">money out is negative (most banks)</option>
+            <option value="posout">money out is positive</option>
+          </select>
+        </div>
+        <div class="grow hidden" id="map-debit-wrap"><label for="map-debit">Money out column</label><select id="map-debit"></select></div>
+        <div class="grow hidden" id="map-credit-wrap"><label for="map-credit">Money in column</label><select id="map-credit"></select></div>
+      </div>
+      <div class="row" style="margin-top:10px; align-items:center;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+          <input type="checkbox" id="map-skip-income" checked style="width:auto;">
+          Skip incoming payments (only review money going out)
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+          <input type="checkbox" id="map-has-header" checked style="width:auto;" onchange="renderMapping()">
+          First row is column headings
+        </label>
+      </div>
+      <hr class="divider">
+      <div class="small muted" style="margin-bottom:4px;">Preview (first rows of your file)</div>
+      <div class="table-scroll"><table id="map-preview"></table></div>
+      <div style="margin-top:14px;">
+        <button class="btn primary" onclick="startReview()">Start reviewing</button>
+        <button class="btn" onclick="resetReview()">Cancel</button>
+      </div>
+      <div id="map-error" class="notice error-banner hidden"></div>
+    </div>
+
+    <div id="review-step-cards" class="hidden">
+      <div class="small muted" id="review-progress-text"></div>
+      <div class="progress-track"><div class="progress-fill" id="review-progress-fill" style="width:0%"></div></div>
+      <div class="card">
+        <div class="txn-head">
+          <span class="muted" id="rv-date"></span>
+          <span class="txn-amount" id="rv-amount"></span>
+        </div>
+        <div class="txn-desc" id="rv-desc"></div>
+        <div class="row">
+          <div class="grow" style="flex:2;">
+            <label for="rv-purpose">What was this for?</label>
+            <input type="text" id="rv-purpose" placeholder="e.g. Camera hire for the shoot">
+          </div>
+          <div class="grow">
+            <label for="rv-category">Category</label>
+            <input type="text" id="rv-category" list="category-list" placeholder="Choose or type…">
+            <datalist id="category-list"></datalist>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <div class="grow">
+            <label for="rv-project">Which project?</label>
+            <select id="rv-project" onchange="onReviewProjectChange()"></select>
+          </div>
+        </div>
+        <div id="rv-newproject" class="row hidden" style="margin-top:10px;">
+          <div class="grow"><label>New project name</label><input type="text" id="rv-np-name"></div>
+          <div class="grow"><label>Budget</label><input type="number" id="rv-np-budget" min="0" step="0.01"></div>
+          <div><button class="btn" id="rv-np-add" onclick="onQuickAddProject()">Create</button></div>
+        </div>
+        <hr class="divider">
+        <div class="row">
+          <button class="btn primary" id="rv-save" onclick="saveCurrentTxn()">Save &amp; next</button>
+          <button class="btn" id="rv-skip" onclick="skipCurrentTxn()">Skip for now</button>
+          <span class="small muted" style="align-self:center;">Skipped items will be asked again next time you upload this statement.</span>
+        </div>
+        <div id="rv-error" class="notice error-banner hidden"></div>
+      </div>
+    </div>
+
+    <div id="review-step-done" class="card hidden">
+      <h2>Statement finished 🎉</h2>
+      <p id="review-summary"></p>
+      <div class="row">
+        <button class="btn primary" onclick="showTab('report')">View cost report</button>
+        <button class="btn" onclick="resetReview()">Upload another statement</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================== REPORT =============================== -->
+  <section id="tab-report" class="hidden">
+    <div class="tiles" id="report-tiles"></div>
+    <div id="report-projects"></div>
+    <div id="report-nonproject"></div>
+  </section>
+</div>
+
+<script>
+  // ------------------------------------------------------------ state
+  var app = { projects: [], transactions: [], settings: { currency: '£' } };
+  var review = {
+    rows: [], filename: '', queue: [], idx: 0,
+    saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0
+  };
+  var DEFAULT_CATEGORIES = [
+    'Crew', 'Cast', 'Equipment', 'Locations', 'Travel', 'Accommodation',
+    'Catering', 'Post-production', 'Insurance', 'Software', 'Office',
+    'Marketing', 'Fees', 'Other'
+  ];
+  var NO_PROJECT = '__none__';
+  var NEW_PROJECT = '__new__';
+
+  // ------------------------------------------------------------ server calls
+  function run(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var runner = google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(function (e) { reject(e); });
+      runner[fn].apply(runner, args);
+    });
+  }
+
+  function showError(msg) {
+    var el = document.getElementById('error');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(function () { el.classList.add('hidden'); }, 8000);
+  }
+
+  // ------------------------------------------------------------ boot
+  window.addEventListener('load', function () {
+    run('getAppData').then(function (data) {
+      app = data;
+      document.getElementById('loading').classList.add('hidden');
+      var cur = document.getElementById('currency');
+      if (![].some.call(cur.options, function (o) { return o.value === app.settings.currency; })) {
+        var opt = document.createElement('option');
+        opt.textContent = app.settings.currency;
+        cur.appendChild(opt);
+      }
+      cur.value = app.settings.currency;
+      var d = new Date();
+      document.getElementById('statement-label').value =
+        d.toLocaleString(undefined, { month: 'long' }) + ' ' + d.getFullYear();
+      renderAll();
+      showTab('projects');
+    }).catch(function (e) {
+      document.getElementById('loading').textContent =
+        'Could not load data: ' + (e && e.message ? e.message : e);
+    });
+  });
+
+  function onCurrencyChange() {
+    var v = document.getElementById('currency').value;
+    app.settings.currency = v;
+    renderAll();
+    run('setSetting', 'currency', v).catch(function (e) { showError('Could not save currency: ' + e.message); });
+  }
+
+  // ------------------------------------------------------------ tabs
+  function showTab(name) {
+    ['projects', 'review', 'report'].forEach(function (t) {
+      document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
+      document.getElementById('nav-' + t).classList.toggle('active', t === name);
+    });
+    if (name === 'report') renderReport();
+    if (name === 'projects') renderProjects();
+  }
+
+  function renderAll() { renderProjects(); renderReport(); }
+
+  // ------------------------------------------------------------ helpers
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fmt(n) {
+    var sign = n < 0 ? '−' : '';
+    return sign + app.settings.currency + Math.abs(n).toLocaleString(undefined,
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function spentByProject() {
+    var spent = {};
+    app.transactions.forEach(function (t) {
+      if (!t.projectId) return;
+      spent[t.projectId] = (spent[t.projectId] || 0) + t.amount;
+    });
+    return spent;
+  }
+  function allCategories() {
+    var seen = {};
+    var cats = DEFAULT_CATEGORIES.slice();
+    cats.forEach(function (c) { seen[c.toLowerCase()] = true; });
+    app.transactions.forEach(function (t) {
+      var c = (t.category || '').trim();
+      if (c && !seen[c.toLowerCase()]) { seen[c.toLowerCase()] = true; cats.push(c); }
+    });
+    return cats;
+  }
+
+  // ------------------------------------------------------------ projects tab
+  function renderProjects() {
+    var spent = spentByProject();
+    var host = document.getElementById('project-list');
+    if (!app.projects.length) {
+      host.innerHTML = '<div class="card muted">No projects yet — add your first one above.</div>';
+      return;
+    }
+    host.innerHTML = app.projects.map(function (p) {
+      var s = spent[p.id] || 0;
+      return '<div class="card">' + projectSummaryHtml(p, s) +
+        '<div style="margin-top:8px;">' +
+        '<button class="linklike" onclick="editProject(\'' + p.id + '\')">Edit</button>' +
+        '<button class="linklike danger" onclick="removeProject(\'' + p.id + '\')">Delete</button>' +
+        '</div><div id="edit-' + p.id + '"></div></div>';
+    }).join('');
+  }
+
+  function projectSummaryHtml(p, s) {
+    return '<div class="proj-head"><h3>' + esc(p.name) + '</h3>' +
+      '<span class="amounts">' + fmt(s) + ' spent of ' + fmt(p.budget) + ' budget</span></div>' +
+      (p.notes ? '<div class="small muted">' + esc(p.notes) + '</div>' : '') +
+      meterHtml(s, p.budget);
+  }
+
+  function meterHtml(spentAmt, budget) {
+    if (!budget) {
+      return '<div class="meter-label small muted" style="margin-top:6px;">No budget set — ' + fmt(spentAmt) + ' spent</div>';
+    }
+    var pct = Math.max(0, spentAmt / budget * 100);
+    var over = spentAmt > budget;
+    var label = over
+      ? '<span class="over-text">⚠ Over budget by ' + fmt(spentAmt - budget) + '</span>'
+      : Math.round(pct) + '% of budget used · ' + fmt(budget - spentAmt) + ' remaining';
+    return '<div class="meter"><div class="fill' + (over ? ' over' : '') + '" style="width:' +
+      Math.min(100, pct).toFixed(1) + '%"></div></div>' +
+      '<div class="meter-label">' + label + '</div>';
+  }
+
+  function onAddProject() {
+    var name = document.getElementById('p-name').value.trim();
+    var budget = parseFloat(document.getElementById('p-budget').value) || 0;
+    var notes = document.getElementById('p-notes').value.trim();
+    if (!name) { showError('Give the project a name first.'); return; }
+    var btn = document.getElementById('p-add');
+    btn.disabled = true; btn.textContent = 'Adding…';
+    run('addProject', name, budget, notes).then(function (projects) {
+      app.projects = projects;
+      document.getElementById('p-name').value = '';
+      document.getElementById('p-budget').value = '';
+      document.getElementById('p-notes').value = '';
+      renderAll();
+    }).catch(function (e) { showError(e.message); })
+      .finally(function () { btn.disabled = false; btn.textContent = 'Add project'; });
+  }
+
+  function editProject(id) {
+    var p = app.projects.filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    var host = document.getElementById('edit-' + id);
+    host.innerHTML =
+      '<hr class="divider"><div class="row">' +
+      '<div class="grow" style="flex:2;"><label>Name</label><input type="text" id="e-name-' + id + '" value="' + esc(p.name) + '"></div>' +
+      '<div class="grow"><label>Budget</label><input type="number" step="0.01" id="e-budget-' + id + '" value="' + p.budget + '"></div>' +
+      '</div><div style="margin-top:8px;"><label>Notes</label><input type="text" id="e-notes-' + id + '" value="' + esc(p.notes) + '"></div>' +
+      '<div style="margin-top:10px;"><button class="btn primary" onclick="saveProjectEdit(\'' + id + '\')">Save</button> ' +
+      '<button class="btn" onclick="renderProjects()">Cancel</button></div>';
+  }
+
+  function saveProjectEdit(id) {
+    var name = document.getElementById('e-name-' + id).value.trim();
+    var budget = parseFloat(document.getElementById('e-budget-' + id).value) || 0;
+    var notes = document.getElementById('e-notes-' + id).value.trim();
+    if (!name) { showError('Project name can’t be empty.'); return; }
+    run('updateProject', id, name, budget, notes).then(function (projects) {
+      app.projects = projects;
+      app.transactions.forEach(function (t) { if (t.projectId === id) t.projectName = name; });
+      renderAll();
+    }).catch(function (e) { showError(e.message); });
+  }
+
+  function removeProject(id) {
+    var p = app.projects.filter(function (x) { return x.id === id; })[0];
+    var n = app.transactions.filter(function (t) { return t.projectId === id; }).length;
+    var msg = 'Delete project “' + p.name + '”?' +
+      (n ? '\n\nIts ' + n + ' recorded transaction(s) stay in the spreadsheet and will show under “(deleted project)” in reports.' : '');
+    if (!confirm(msg)) return;
+    run('deleteProject', id).then(function (projects) {
+      app.projects = projects;
+      renderAll();
+    }).catch(function (e) { showError(e.message); });
+  }
+
+  // ------------------------------------------------------------ CSV parsing
+  function parseCSV(text) {
+    var rows = [], row = [], field = '', inQ = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (inQ) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; } else { inQ = false; }
+        } else { field += c; }
+      } else if (c === '"') { inQ = true; }
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(field);
+        if (row.length > 1 || row[0].trim() !== '') rows.push(row);
+        row = []; field = '';
+      } else { field += c; }
+    }
+    row.push(field);
+    if (row.length > 1 || row[0].trim() !== '') rows.push(row);
+    return rows;
+  }
+
+  function parseAmount(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return NaN;
+    var neg = /^\(.*\)$/.test(s);
+    s = s.replace(/[()]/g, '');
+    s = s.replace(/[^0-9.,\-]/g, '');
+    if (/,\d{1,2}$/.test(s) && s.indexOf('.') === -1) s = s.replace(',', '.'); // 1234,56
+    else s = s.replace(/,/g, '');
+    var n = parseFloat(s);
+    if (isNaN(n)) return NaN;
+    return neg ? -n : n;
+  }
+
+  var MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+  function parseDate(raw, fmt) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return null;
+    // Month-name forms: "03 Jan 2026", "Jan 3, 2026", "3-Jan-26"
+    var m = s.match(/^(\d{1,2})[ \-\/]([A-Za-z]{3,})[ \-\/,]+(\d{2,4})$/) ||
+            s.match(/^([A-Za-z]{3,})[ \-\/]+(\d{1,2})[ \-\/,]+(\d{2,4})$/);
+    if (m) {
+      var day, monName, year;
+      if (isNaN(parseInt(m[1], 10))) { monName = m[1]; day = m[2]; year = m[3]; }
+      else { day = m[1]; monName = m[2]; year = m[3]; }
+      var mon = MONTHS[monName.slice(0, 3).toLowerCase()];
+      if (mon) return isoDate(year, mon, day);
+    }
+    var parts = s.split(/[\/\-. ]+/).filter(Boolean);
+    if (parts.length !== 3 || parts.some(function (p) { return isNaN(parseInt(p, 10)); })) return null;
+    var a = parseInt(parts[0], 10), b = parseInt(parts[1], 10), c = parseInt(parts[2], 10);
+    if (parts[0].length === 4) return isoDate(a, b, c);           // YYYY-MM-DD
+    if (fmt === 'YMD') return isoDate(a, b, c);
+    if (fmt === 'MDY') return isoDate(c, a, b);
+    return isoDate(c, b, a);                                       // DMY
+  }
+
+  function isoDate(y, m, d) {
+    y = parseInt(y, 10); m = parseInt(m, 10); d = parseInt(d, 10);
+    if (y < 100) y += 2000;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+    return y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
+
+  /** Auto-detect DMY vs MDY by looking for any first/second component > 12. */
+  function detectDateFormat(values) {
+    var sawFirstOver12 = false, sawSecondOver12 = false;
+    values.forEach(function (v) {
+      var parts = String(v || '').trim().split(/[\/\-. ]+/).filter(Boolean);
+      if (parts.length !== 3 || parts[0].length === 4) return;
+      var a = parseInt(parts[0], 10), b = parseInt(parts[1], 10);
+      if (a > 12) sawFirstOver12 = true;
+      if (b > 12) sawSecondOver12 = true;
+    });
+    if (sawFirstOver12 && !sawSecondOver12) return 'DMY';
+    if (sawSecondOver12 && !sawFirstOver12) return 'MDY';
+    return 'DMY';
+  }
+
+  function hashTxn(key) {
+    var h = 5381;
+    for (var i = 0; i < key.length; i++) {
+      h = ((h * 33) ^ key.charCodeAt(i)) >>> 0;
+    }
+    return 't' + h.toString(36) + key.length.toString(36);
+  }
+
+  // ------------------------------------------------------------ review flow
+  function onFileChosen() {
+    var input = document.getElementById('csv-file');
+    if (!input.files || !input.files.length) return;
+    var file = input.files[0];
+    review.filename = file.name;
+    var label = document.getElementById('statement-label');
+    if (file.name) label.value = file.name.replace(/\.[^.]*$/, '').replace(/[_\-]+/g, ' ').trim() || label.value;
+    var reader = new FileReader();
+    reader.onload = function () { loadCsvText(String(reader.result)); };
+    reader.onerror = function () { showError('Could not read that file.'); };
+    reader.readAsText(file);
+  }
+
+  function onPasteCsv() {
+    var text = document.getElementById('csv-paste').value;
+    if (!text.trim()) { showError('Paste some CSV text first.'); return; }
+    loadCsvText(text);
+  }
+
+  function loadCsvText(text) {
+    var rows = parseCSV(text);
+    if (rows.length < 1) { showError('That file appears to be empty.'); return; }
+    review.rows = rows;
+    document.getElementById('review-step-upload').classList.add('hidden');
+    document.getElementById('review-step-done').classList.add('hidden');
+    document.getElementById('review-step-map').classList.remove('hidden');
+    renderMapping();
+  }
+
+  function guessColumn(headers, patterns) {
+    for (var i = 0; i < headers.length; i++) {
+      var h = String(headers[i]).toLowerCase();
+      for (var p = 0; p < patterns.length; p++) {
+        if (patterns[p].test(h)) return i;
+      }
+    }
+    return -1;
+  }
+
+  function renderMapping() {
+    var hasHeader = document.getElementById('map-has-header').checked;
+    var headers = review.rows[0].map(function (h, i) {
+      return hasHeader ? (String(h).trim() || 'Column ' + (i + 1)) : 'Column ' + (i + 1);
+    });
+    function fill(id, guessIdx, allowNone) {
+      var sel = document.getElementById(id);
+      sel.innerHTML = (allowNone ? '<option value="-1">— none —</option>' : '') +
+        headers.map(function (h, i) { return '<option value="' + i + '">' + esc(h) + '</option>'; }).join('');
+      sel.value = String(guessIdx);
+      if (sel.selectedIndex === -1) sel.selectedIndex = 0;
+    }
+    var gDate = guessColumn(headers, [/date/]);
+    var gDesc = guessColumn(headers, [/desc/, /detail/, /narrat/, /memo/, /merchant/, /payee/, /reference/, /name/, /transaction/]);
+    var gDebit = guessColumn(headers, [/debit/, /money out/, /paid out/, /withdraw/, /out\b/]);
+    var gCredit = guessColumn(headers, [/credit/, /money in/, /paid in/, /deposit/, /in\b/]);
+    var gAmount = guessColumn(headers, [/amount/, /value/, /^sum$/]);
+    fill('map-date', gDate === -1 ? 0 : gDate, false);
+    fill('map-desc', gDesc === -1 ? Math.min(1, headers.length - 1) : gDesc, false);
+    fill('map-amount', gAmount === -1 ? headers.length - 1 : gAmount, false);
+    fill('map-debit', gDebit, true);
+    fill('map-credit', gCredit, true);
+    var mode = (gDebit !== -1 && gCredit !== -1 && gAmount === -1) ? 'two' : 'single';
+    document.getElementById('map-amountmode').value = mode;
+    renderMappingAmountFields();
+    document.getElementById('map-datefmt').value = 'auto';
+
+    // preview table
+    var preview = review.rows.slice(0, hasHeader ? 6 : 5);
+    var html = '<tr>' + headers.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr>';
+    preview.slice(hasHeader ? 1 : 0).forEach(function (r) {
+      html += '<tr>' + headers.map(function (_, i) { return '<td>' + esc(r[i]) + '</td>'; }).join('') + '</tr>';
+    });
+    document.getElementById('map-preview').innerHTML = html;
+  }
+
+  function renderMappingAmountFields() {
+    var two = document.getElementById('map-amountmode').value === 'two';
+    document.getElementById('map-single-wrap').classList.toggle('hidden', two);
+    document.getElementById('map-sign-wrap').classList.toggle('hidden', two);
+    document.getElementById('map-debit-wrap').classList.toggle('hidden', !two);
+    document.getElementById('map-credit-wrap').classList.toggle('hidden', !two);
+  }
+
+  function startReview() {
+    var errEl = document.getElementById('map-error');
+    errEl.classList.add('hidden');
+    var hasHeader = document.getElementById('map-has-header').checked;
+    var dateIdx = parseInt(document.getElementById('map-date').value, 10);
+    var descIdx = parseInt(document.getElementById('map-desc').value, 10);
+    var mode = document.getElementById('map-amountmode').value;
+    var amountIdx = parseInt(document.getElementById('map-amount').value, 10);
+    var debitIdx = parseInt(document.getElementById('map-debit').value, 10);
+    var creditIdx = parseInt(document.getElementById('map-credit').value, 10);
+    var sign = document.getElementById('map-sign').value;
+    var skipIncome = document.getElementById('map-skip-income').checked;
+    var fmtChoice = document.getElementById('map-datefmt').value;
+
+    var dataRows = review.rows.slice(hasHeader ? 1 : 0);
+    if (fmtChoice === 'auto') {
+      fmtChoice = detectDateFormat(dataRows.map(function (r) { return r[dateIdx]; }));
+    }
+
+    var known = {};
+    app.transactions.forEach(function (t) { known[t.hash] = true; });
+
+    var occ = {};
+    review.queue = [];
+    review.idx = 0;
+    review.saved = 0; review.skipped = 0; review.duplicates = 0; review.skippedIncome = 0;
+    var invalid = 0;
+
+    dataRows.forEach(function (r) {
+      var desc = String(r[descIdx] == null ? '' : r[descIdx]).trim();
+      var amountOut;
+      if (mode === 'two') {
+        var deb = debitIdx >= 0 ? parseAmount(r[debitIdx]) : NaN;
+        var cred = creditIdx >= 0 ? parseAmount(r[creditIdx]) : NaN;
+        if (!isNaN(deb) && deb !== 0) amountOut = Math.abs(deb);
+        else if (!isNaN(cred) && cred !== 0) amountOut = -Math.abs(cred);
+        else amountOut = NaN;
+      } else {
+        var n = parseAmount(r[amountIdx]);
+        amountOut = sign === 'negout' ? -n : n;   // normalise: positive = money out
+      }
+      var date = parseDate(r[dateIdx], fmtChoice);
+      if (!desc && isNaN(amountOut)) return;      // blank row
+      if (isNaN(amountOut) || !date) { invalid++; return; }
+      if (amountOut <= 0 && skipIncome) { review.skippedIncome++; return; }
+
+      var key = date + '|' + desc.toLowerCase().replace(/\s+/g, ' ') + '|' + amountOut.toFixed(2);
+      occ[key] = (occ[key] || 0) + 1;
+      var hash = hashTxn(key + '|' + occ[key]);
+      if (known[hash]) { review.duplicates++; return; }
+      review.queue.push({ hash: hash, date: date, description: desc, amount: amountOut });
+    });
+
+    if (!review.queue.length) {
+      var msg = 'Nothing new to review in this file.';
+      if (review.duplicates) msg += ' ' + review.duplicates + ' transaction(s) were already recorded.';
+      if (review.skippedIncome) msg += ' ' + review.skippedIncome + ' incoming payment(s) were skipped.';
+      if (invalid) msg += ' ' + invalid + ' row(s) couldn’t be read — check the column mapping.';
+      errEl.textContent = msg;
+      errEl.classList.remove('hidden');
+      return;
+    }
+    if (invalid) showError(invalid + ' row(s) couldn’t be read and were left out.');
+
+    document.getElementById('review-step-map').classList.add('hidden');
+    document.getElementById('review-step-cards').classList.remove('hidden');
+    renderReviewCard();
+  }
+
+  function renderReviewCard() {
+    var t = review.queue[review.idx];
+    var total = review.queue.length;
+    document.getElementById('review-progress-text').textContent =
+      'Transaction ' + (review.idx + 1) + ' of ' + total +
+      (review.duplicates ? ' · ' + review.duplicates + ' already recorded' : '');
+    document.getElementById('review-progress-fill').style.width =
+      (review.idx / total * 100).toFixed(1) + '%';
+
+    document.getElementById('rv-date').textContent = t.date;
+    var amtEl = document.getElementById('rv-amount');
+    amtEl.textContent = t.amount >= 0 ? fmt(t.amount) : '+' + fmt(-t.amount) + ' in';
+    amtEl.classList.toggle('credit', t.amount < 0);
+    document.getElementById('rv-desc').textContent = t.description;
+    document.getElementById('rv-purpose').value = '';
+    document.getElementById('rv-category').value = '';
+    document.getElementById('rv-error').classList.add('hidden');
+
+    document.getElementById('category-list').innerHTML =
+      allCategories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
+
+    var sel = document.getElementById('rv-project');
+    var prev = sel.value;
+    sel.innerHTML =
+      app.projects.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') +
+      '<option value="' + NO_PROJECT + '">Not project-related</option>' +
+      '<option value="' + NEW_PROJECT + '">＋ New project…</option>';
+    if (prev && [].some.call(sel.options, function (o) { return o.value === prev; })) sel.value = prev;
+    onReviewProjectChange();
+    document.getElementById('rv-purpose').focus();
+  }
+
+  function onReviewProjectChange() {
+    var isNew = document.getElementById('rv-project').value === NEW_PROJECT;
+    document.getElementById('rv-newproject').classList.toggle('hidden', !isNew);
+  }
+
+  function onQuickAddProject() {
+    var name = document.getElementById('rv-np-name').value.trim();
+    var budget = parseFloat(document.getElementById('rv-np-budget').value) || 0;
+    if (!name) { showError('Give the new project a name.'); return; }
+    var btn = document.getElementById('rv-np-add');
+    btn.disabled = true; btn.textContent = 'Creating…';
+    run('addProject', name, budget, '').then(function (projects) {
+      app.projects = projects;
+      var created = projects.filter(function (p) { return p.name === name; }).pop();
+      var sel = document.getElementById('rv-project');
+      sel.innerHTML =
+        app.projects.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') +
+        '<option value="' + NO_PROJECT + '">Not project-related</option>' +
+        '<option value="' + NEW_PROJECT + '">＋ New project…</option>';
+      sel.value = created ? created.id : sel.options[0].value;
+      document.getElementById('rv-np-name').value = '';
+      document.getElementById('rv-np-budget').value = '';
+      onReviewProjectChange();
+    }).catch(function (e) { showError(e.message); })
+      .finally(function () { btn.disabled = false; btn.textContent = 'Create'; });
+  }
+
+  function saveCurrentTxn() {
+    var t = review.queue[review.idx];
+    var projSel = document.getElementById('rv-project').value;
+    if (projSel === NEW_PROJECT) { showError('Create the new project first (or pick an existing one).'); return; }
+    var proj = app.projects.filter(function (p) { return p.id === projSel; })[0];
+    var txn = {
+      hash: t.hash,
+      date: t.date,
+      description: t.description,
+      amount: t.amount,
+      projectId: proj ? proj.id : '',
+      projectName: proj ? proj.name : '',
+      purpose: document.getElementById('rv-purpose').value.trim(),
+      category: document.getElementById('rv-category').value.trim(),
+      statement: document.getElementById('statement-label').value.trim()
+    };
+    var saveBtn = document.getElementById('rv-save');
+    var skipBtn = document.getElementById('rv-skip');
+    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    run('saveTransactions', [txn]).then(function () {
+      app.transactions.push(txn);
+      review.saved++;
+      advanceReview();
+    }).catch(function (e) {
+      var el = document.getElementById('rv-error');
+      el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
+      el.classList.remove('hidden');
+    }).finally(function () {
+      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
+    });
+  }
+
+  function skipCurrentTxn() {
+    review.skipped++;
+    advanceReview();
+  }
+
+  function advanceReview() {
+    review.idx++;
+    if (review.idx >= review.queue.length) {
+      document.getElementById('review-step-cards').classList.add('hidden');
+      document.getElementById('review-step-done').classList.remove('hidden');
+      var bits = ['Recorded ' + review.saved + ' transaction(s).'];
+      if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
+      if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
+      if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
+      document.getElementById('review-summary').textContent = bits.join(' ');
+      renderAll();
+    } else {
+      renderReviewCard();
+    }
+  }
+
+  function resetReview() {
+    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0 };
+    document.getElementById('csv-file').value = '';
+    document.getElementById('review-step-map').classList.add('hidden');
+    document.getElementById('review-step-cards').classList.add('hidden');
+    document.getElementById('review-step-done').classList.add('hidden');
+    document.getElementById('review-step-upload').classList.remove('hidden');
+  }
+
+  // ------------------------------------------------------------ report tab
+  function renderReport() {
+    var spent = spentByProject();
+    var totalBudget = 0, totalSpent = 0;
+    app.projects.forEach(function (p) { totalBudget += p.budget; totalSpent += spent[p.id] || 0; });
+
+    // include spend recorded against projects that were later deleted
+    var knownIds = {};
+    app.projects.forEach(function (p) { knownIds[p.id] = true; });
+    var orphans = {};   // projectId -> {name, total, txns}
+    var nonProject = { total: 0, count: 0 };
+    app.transactions.forEach(function (t) {
+      if (!t.projectId) { nonProject.total += t.amount; nonProject.count++; return; }
+      if (!knownIds[t.projectId]) {
+        if (!orphans[t.projectId]) orphans[t.projectId] = { name: t.projectName || 'Unknown', total: 0 };
+        orphans[t.projectId].total += t.amount;
+        totalSpent += t.amount;
+      }
+    });
+
+    var remaining = totalBudget - totalSpent;
+    document.getElementById('report-tiles').innerHTML =
+      tileHtml('Total budget', fmt(totalBudget), false) +
+      tileHtml('Total spent', fmt(totalSpent), false) +
+      tileHtml(remaining >= 0 ? 'Remaining' : 'Over budget', fmt(Math.abs(remaining)), remaining < 0);
+
+    var host = document.getElementById('report-projects');
+    if (!app.projects.length && !app.transactions.length) {
+      host.innerHTML = '<div class="card muted">Nothing here yet — add a project, then upload a statement to review.</div>';
+      document.getElementById('report-nonproject').innerHTML = '';
+      return;
+    }
+
+    var html = app.projects.map(function (p) {
+      return projectReportCard(p.id, p, spent[p.id] || 0);
+    }).join('');
+    Object.keys(orphans).forEach(function (id) {
+      html += projectReportCard(id, { name: orphans[id].name + ' (deleted project)', budget: 0, notes: '' }, orphans[id].total);
+    });
+    host.innerHTML = html;
+
+    document.getElementById('report-nonproject').innerHTML = nonProject.count
+      ? '<div class="card small muted">' + nonProject.count + ' transaction(s) totalling ' +
+        fmt(nonProject.total) + ' were marked “not project-related”.</div>'
+      : '';
+  }
+
+  function tileHtml(label, value, negative) {
+    return '<div class="tile"><div class="t-label">' + esc(label) + '</div>' +
+      '<div class="t-value' + (negative ? ' negative' : '') + '">' + esc(value) + '</div></div>';
+  }
+
+  function projectReportCard(id, p, spentAmt) {
+    var txns = app.transactions.filter(function (t) { return t.projectId === id; });
+    // category breakdown, largest first
+    var byCat = {};
+    txns.forEach(function (t) {
+      var c = (t.category || 'Uncategorised').trim() || 'Uncategorised';
+      byCat[c] = (byCat[c] || 0) + t.amount;
+    });
+    var cats = Object.keys(byCat).map(function (c) { return { name: c, total: byCat[c] }; })
+      .sort(function (a, b) { return b.total - a.total; });
+    var maxCat = cats.length ? Math.max.apply(null, cats.map(function (c) { return Math.abs(c.total); })) : 1;
+
+    var catHtml = cats.map(function (c) {
+      var w = maxCat ? Math.abs(c.total) / maxCat * 100 : 0;
+      return '<div class="cat-row"><span class="cat-name" title="' + esc(c.name) + '">' + esc(c.name) + '</span>' +
+        '<span class="cat-bar-track"><span class="cat-bar" style="display:block;width:' + w.toFixed(1) + '%"></span></span>' +
+        '<span class="cat-val">' + fmt(c.total) + '</span></div>';
+    }).join('');
+
+    var rowsHtml = txns.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; })
+      .map(function (t) {
+        return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
+          (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
+          '<td>' + esc(t.category) + '</td><td>' + esc(t.statement) + '</td>' +
+          '<td class="num">' + fmt(t.amount) + '</td>' +
+          '<td><button class="linklike danger" title="Delete this transaction" onclick="removeTxn(\'' + t.hash + '\')">✕</button></td></tr>';
+      }).join('');
+
+    return '<div class="card">' + projectSummaryHtml(p, spentAmt) +
+      (cats.length ? '<hr class="divider">' + catHtml : '') +
+      (txns.length
+        ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--accent);">' +
+          txns.length + ' transaction(s) — show details</summary>' +
+          '<div class="table-scroll" style="margin-top:8px;"><table><tr><th>Date</th><th>Description</th>' +
+          '<th>Category</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
+          rowsHtml + '</table></div></details>'
+        : '<div class="small muted" style="margin-top:8px;">No spending recorded yet.</div>') +
+      '</div>';
+  }
+
+  function removeTxn(hash) {
+    if (!confirm('Delete this transaction from the record? If you re-upload its statement it will be offered for review again.')) return;
+    run('deleteTransaction', hash).then(function (txns) {
+      app.transactions = txns;
+      renderAll();
+    }).catch(function (e) { showError(e.message); });
+  }
+</script>
+</body>
+</html>
