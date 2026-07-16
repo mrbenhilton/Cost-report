@@ -24,9 +24,11 @@ var PROJECT_HEADERS = ['ID', 'Name', 'Client', 'Budget', 'Fee', 'Version', 'Note
  */
 var OVERHEADS_ID = 'company-overheads';
 var LINE_HEADERS = ['ID', 'Project ID', 'Section', 'Item', 'Description', 'Qty', 'Rate', 'Amount', 'Order'];
+// Amount is always the ex-VAT (net) figure — the one reconciled against
+// budgets. Gross is what actually left the bank; VAT is the difference.
 var TXN_HEADERS = [
-  'Hash', 'Date', 'Description', 'Amount', 'Project ID', 'Project Name',
-  'Line ID', 'Line Name', 'Category', 'Purpose', 'Statement', 'Recorded'
+  'Hash', 'Date', 'Description', 'Amount', 'Gross', 'VAT', 'Project ID',
+  'Project Name', 'Line ID', 'Line Name', 'Category', 'Purpose', 'Statement', 'Recorded'
 ];
 var SETTINGS_HEADERS = ['Key', 'Value'];
 
@@ -307,6 +309,8 @@ function listTransactions_() {
       date: formatDate_(v[d.col['Date']]),
       description: String(v[d.col['Description']] || ''),
       amount: Number(v[d.col['Amount']]) || 0,
+      gross: Number(v[d.col['Gross']]) || 0,
+      vat: Number(v[d.col['VAT']]) || 0,
       projectId: String(v[d.col['Project ID']] || ''),
       projectName: String(v[d.col['Project Name']] || ''),
       lineId: String(v[d.col['Line ID']] || ''),
@@ -342,6 +346,7 @@ function saveTransactions(txns) {
       rows.push(rowArray_(d.col, TXN_HEADERS, {
         'Hash': String(t.hash), 'Date': String(t.date || ''),
         'Description': String(t.description || ''), 'Amount': Number(t.amount) || 0,
+        'Gross': Number(t.gross) || Number(t.amount) || 0, 'VAT': Number(t.vat) || 0,
         'Project ID': String(t.projectId || ''), 'Project Name': String(t.projectName || ''),
         'Line ID': String(t.lineId || ''), 'Line Name': String(t.lineName || ''),
         'Category': String(t.category || ''), 'Purpose': String(t.purpose || ''),

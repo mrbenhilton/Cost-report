@@ -331,6 +331,16 @@
         </div>
         <div class="txn-desc" id="rv-desc"></div>
         <div class="small muted hidden" id="rv-note" style="margin:-8px 0 14px;"></div>
+        <div class="row" style="align-items:center; margin:-4px 0 12px;">
+          <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+            <input type="checkbox" id="rv-vat" style="width:auto;" onchange="onVatToggle()">
+            Amount includes VAT
+          </label>
+          <span id="rv-vat-rate-wrap" class="small hidden" style="display:flex; align-items:center; gap:4px;">
+            at <input type="number" id="rv-vat-rate" min="0" max="100" step="0.5" style="width:70px; padding:4px 6px;" oninput="onVatToggle()"> %
+          </span>
+          <span class="small muted" id="rv-vat-preview"></span>
+        </div>
         <div class="row" id="rv-project-row">
           <div class="grow">
             <label for="rv-project">Which project?</label>
@@ -1316,6 +1326,10 @@
 
     document.getElementById('rv-category').value = '';
     document.getElementById('rv-error').classList.add('hidden');
+    document.getElementById('rv-vat').checked = false;
+    document.getElementById('rv-vat-rate').value = String(defaultVatRate());
+    document.getElementById('rv-vat-rate-wrap').classList.add('hidden');
+    document.getElementById('rv-vat-preview').textContent = '';
 
     document.getElementById('category-list').innerHTML =
       allCategories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
@@ -1340,6 +1354,40 @@
       updateIncomeRemaining();
     }
     document.getElementById('rv-purpose').focus();
+  }
+
+  // ------------------------------------------------------- VAT handling
+  function defaultVatRate() {
+    var r = parseFloat(app.settings.vatRate);
+    return isNaN(r) ? 20 : r;
+  }
+
+  /** The current card's ex-VAT total (positive), respecting the VAT toggle. */
+  function currentCardNetTotal() {
+    var t = review.queue[review.idx];
+    var gross = Math.abs(t.amount);
+    if (!document.getElementById('rv-vat').checked) return gross;
+    var rate = parseFloat(document.getElementById('rv-vat-rate').value) || 0;
+    return Math.round(gross / (1 + rate / 100) * 100) / 100;
+  }
+
+  function onVatToggle() {
+    var t = review.queue[review.idx];
+    var on = document.getElementById('rv-vat').checked;
+    document.getElementById('rv-vat-rate-wrap').classList.toggle('hidden', !on);
+    var net = currentCardNetTotal();
+    var vat = Math.round((Math.abs(t.amount) - net) * 100) / 100;
+    document.getElementById('rv-vat-preview').textContent = on
+      ? (t.amount < 0
+          ? '→ allocating ' + fmt(net) + ' ex-VAT (' + fmt(vat) + ' VAT)'
+          : '→ ' + fmt(net) + ' will count against the budget (' + fmt(vat) + ' VAT)')
+      : '';
+    if (t.amount < 0) {
+      // income: rebuild the split with the new ex-VAT total
+      document.getElementById('rv-income-rows').innerHTML = '';
+      addIncomeSplitRow(net);
+      updateIncomeRemaining();
+    }
   }
 
   // ------------------------------------------------- income split editor
@@ -1378,7 +1426,7 @@
   function updateIncomeRemaining() {
     var t = review.queue[review.idx];
     if (!t || t.amount >= 0) return;
-    var total = -t.amount;
+    var total = currentCardNetTotal();
     var allocated = 0;
     document.querySelectorAll('#rv-income-rows .is-amt').forEach(function (input) {
       allocated += parseFloat(input.value) || 0;
@@ -1503,11 +1551,14 @@
       category = document.getElementById('rv-category').value.trim();
     }
 
+    var net = currentCardNetTotal();
     var txn = {
       hash: t.hash,
       date: t.date,
       description: t.description,
-      amount: t.amount,
+      amount: net,                                       // ex-VAT: what counts against the budget
+      gross: t.amount,                                   // what actually left the bank
+      vat: Math.round((t.amount - net) * 100) / 100,
       projectId: proj ? proj.id : '',
       projectName: proj ? proj.name : '',
       lineId: lineId,
@@ -1538,21 +1589,26 @@
   }
 
   function saveIncomeSplit(t) {
-    var parts = readIncomeSplit(-t.amount);
+    var net = currentCardNetTotal();
+    var parts = readIncomeSplit(net);
     if (!parts) {
       var el = document.getElementById('rv-error');
-      el.textContent = 'The split needs positive amounts that add up to ' + fmt(-t.amount) + '.';
+      el.textContent = 'The split needs positive amounts that add up to ' + fmt(net) + '.';
       el.classList.remove('hidden');
       return;
     }
+    var grossFactor = net ? -t.amount / net : 1;   // spread the VAT across the parts pro-rata
     var purpose = document.getElementById('rv-purpose').value.trim();
     var statement = document.getElementById('statement-label').value.trim();
     var txns = parts.map(function (part, i) {
       var proj = app.projects.filter(function (p) { return p.id === part.projectId; })[0];
+      var partGross = Math.round(part.amount * grossFactor * 100) / 100;
       return {
         hash: i ? t.hash + '~' + i : t.hash,   // part 0 keeps the base hash so re-uploads dedupe
         date: t.date, description: t.description,
         amount: -part.amount,
+        gross: -partGross,
+        vat: -Math.round((partGross - part.amount) * 100) / 100,
         projectId: proj ? proj.id : '',
         projectName: proj ? proj.name : '',
         lineId: INCOME_LINE, lineName: 'Income', category: 'Income',
@@ -1689,7 +1745,8 @@
         return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
           (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
           '<td>' + esc(t.category || '') + '</td><td>' + esc(t.statement) + '</td>' +
-          '<td class="num">' + fmt(t.amount) + '</td>' +
+          '<td class="num">' + fmt(t.amount) +
+          (t.vat ? '<div class="muted small">+ ' + fmt(Math.abs(t.vat)) + ' VAT</div>' : '') + '</td>' +
           '<td><button class="linklike danger" title="Delete this transaction" onclick="removeTxn(\'' + t.hash + '\')">✕</button></td></tr>';
       }).join('');
 
@@ -1717,8 +1774,9 @@
     app.transactions.forEach(function (t) {
       var label = t.statement || '(no statement label)';
       var s = stmts[label];
-      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, income: 0, total: 0, latestDate: '' };
+      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, income: 0, vat: 0, total: 0, latestDate: '' };
       if (t.date > s.latestDate) s.latestDate = t.date;
+      if (t.vat > 0) s.vat += t.vat;
       if (isIncomeTxn(t)) {
         if (t.projectId) s.income += -t.amount;
         return;
@@ -1742,6 +1800,10 @@
       if (s.income) {
         html += '<tr><td style="padding-left:24px;" class="muted">Income received</td>' +
           '<td class="num" style="color:var(--good);">+' + fmt(s.income) + '</td></tr>';
+      }
+      if (s.vat) {
+        html += '<tr><td style="padding-left:24px;" class="muted">VAT on costs (excluded from budgets)</td>' +
+          '<td class="num muted">' + fmt(s.vat) + '</td></tr>';
       }
       if (s.ignored) {
         html += '<tr><td style="padding-left:24px;" class="muted">Ignored (personal / transfers)</td>' +
@@ -1780,7 +1842,8 @@
           (!income && t.lineId && t.category ? '<div class="muted">' + esc(t.category) + '</div>' : '') + '</td>' +
           '<td>' + esc(t.statement) + '</td>' +
           '<td class="num"' + (income ? ' style="color:var(--good);"' : '') + '>' +
-          (income ? '+' + fmt(-t.amount) : fmt(t.amount)) + '</td>' +
+          (income ? '+' + fmt(-t.amount) : fmt(t.amount)) +
+          (t.vat ? '<div class="muted small">+ ' + fmt(Math.abs(t.vat)) + ' VAT</div>' : '') + '</td>' +
           '<td><button class="linklike danger" title="Delete this transaction" onclick="removeTxn(\'' + t.hash + '\')">✕</button></td></tr>';
       }).join('');
 
@@ -1820,6 +1883,9 @@
       '<div><label>Date</label><input type="date" id="mx-date" value="' + today + '"></div>' +
       '<div class="grow" style="flex:2;"><label>Description</label><input type="text" id="mx-desc" placeholder="e.g. Director days — paid via payroll"></div>' +
       '<div class="grow"><label>Amount</label><input type="number" id="mx-amount" min="0" step="0.01" placeholder="0.00"></div>' +
+      '<div><label>&nbsp;</label><label style="display:flex; align-items:center; gap:5px; font-weight:400; font-size:13px; padding:9px 0;">' +
+      '<input type="checkbox" id="mx-vat" style="width:auto;"> includes VAT at ' +
+      '<input type="number" id="mx-vat-rate" min="0" max="100" step="0.5" value="' + defaultVatRate() + '" style="width:65px; padding:4px 6px;"> %</label></div>' +
       '</div><div class="row" style="margin-top:10px;">' + lineField +
       '<div class="grow" id="mx-category-wrap"><label>Category</label><input type="text" id="mx-category" list="category-list" placeholder="Choose or type…"></div>' +
       '<div class="grow" style="flex:2;"><label>Note (optional)</label><input type="text" id="mx-purpose"></div>' +
@@ -1857,9 +1923,15 @@
       category = document.getElementById('mx-category').value.trim() || (sel ? 'Overage' : 'Other');
       lineName = sel ? 'Overage' : '';
     }
+    var gross = amount;
+    if (document.getElementById('mx-vat').checked) {
+      var rate = parseFloat(document.getElementById('mx-vat-rate').value) || 0;
+      amount = Math.round(gross / (1 + rate / 100) * 100) / 100;
+    }
     var txn = {
       hash: 'mx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       date: date, description: desc, amount: amount,
+      gross: gross, vat: Math.round((gross - amount) * 100) / 100,
       projectId: p.id, projectName: p.name,
       lineId: lineId, lineName: lineName, category: category,
       purpose: document.getElementById('mx-purpose').value.trim(),

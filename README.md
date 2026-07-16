@@ -113,6 +113,15 @@ version label and total update.
      card; allocate them to the project they refund.
 4. Step through each transaction: pick the project, pick the **budget line**
    (grouped by your budget's sections), optionally add a note, **Save & next**.
+
+   **VAT:** budgets are ex-VAT, so every card has an *Amount includes VAT*
+   tick-box (default rate 20%, editable per transaction). Tick it and the
+   **ex-VAT figure is what's recorded against the budget line** — the gross
+   amount and the VAT are stored alongside it in the sheet, and the
+   by-statement view totals the VAT excluded from costs each month. The same
+   toggle appears on income cards (allocate the ex-VAT amount) and manual
+   expenses. To change the default rate, add a `vatRate` row to the
+   `Settings` tab (e.g. `vatRate | 20`).
    **Incoming payments get an income card instead**: allocate the payment to a
    project — or **split it across several projects** with the built-in split
    editor (a live counter shows the unallocated remainder). Income can also go
