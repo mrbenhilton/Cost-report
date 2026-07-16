@@ -2,37 +2,44 @@
 <html>
 <head>
 <meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: light;
-    --page:           #f9f9f7;
-    --surface:        #fcfcfb;
-    --ink:            #0b0b0b;
+    accent-color:     #1c5d3a;
+    --page:           #f9f9f5;
+    --surface:        #fdfdfa;
+    --ink:            #131311;
     --ink-2:          #52514e;
     --muted:          #898781;
     --hairline:       #e1e0d9;
     --border:         rgba(11, 11, 11, 0.10);
-    --accent:         #2a78d6;   /* series-1 blue: spend meters, bars */
-    --accent-soft:    #cde2fb;
+    --accent:         #1c5d3a;   /* series-1 blue: spend meters, bars */
+    --accent-soft:    #d8e8dd;
+    --link:           #1c5d3a;
     --good:           #006300;
-    --critical:       #d03b3b;
+    --critical:       #b03030;
     --credit:         #006300;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       color-scheme: dark;
-      --page:           #0d0d0d;
-      --surface:        #1a1a19;
-      --ink:            #ffffff;
+      accent-color:     #4f9c71;
+      --page:           #0d0f0d;
+      --surface:        #191b19;
+      --ink:            #f2f1ea;
       --ink-2:          #c3c2b7;
       --muted:          #898781;
       --hairline:       #2c2c2a;
       --border:         rgba(255, 255, 255, 0.10);
-      --accent:         #3987e5;
-      --accent-soft:    #184f95;
-      --good:           #0ca30c;
-      --critical:       #d03b3b;
-      --credit:         #0ca30c;
+      --accent:         #2f7d4f;
+      --accent-soft:    #1d3b2a;
+      --link:           #82c8a0;
+      --good:           #4f9c71;
+      --critical:       #e66767;
+      --credit:         #4f9c71;
     }
   }
 
@@ -41,13 +48,14 @@
   body {
     background: var(--page);
     color: var(--ink);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 14px/1.55 "Courier Prime", "American Typewriter", "Courier New", Courier, monospace;
   }
+  input, select, textarea, button { font-family: inherit; }
   .wrap { max-width: 900px; margin: 0 auto; padding: 16px 16px 64px; }
 
   header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 8px 0 4px; }
   header h1 { font-size: 20px; margin: 0; flex: 1; }
-  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  header a { color: var(--link); text-decoration: none; font-size: 13px; }
   header a:hover { text-decoration: underline; }
 
   nav { display: flex; gap: 4px; border-bottom: 1px solid var(--hairline); margin: 8px 0 20px; }
@@ -85,7 +93,7 @@
   button.btn:disabled { opacity: 0.5; cursor: default; }
   button.linklike {
     background: none; border: none; padding: 2px 4px; font: inherit; font-size: 13px;
-    color: var(--accent); cursor: pointer;
+    color: var(--link); cursor: pointer;
   }
   button.danger { color: var(--critical); }
 
@@ -1754,7 +1762,7 @@
       '<hr class="divider">' + incomeHtml +
       (bars ? '<hr class="divider"><div class="small muted" style="margin-bottom:6px;">Company expenses by category</div>' + bars : '') +
       (expenses.length
-        ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--accent);">' +
+        ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--link);">' +
           expenses.length + ' expense(s) — show details</summary>' +
           '<div class="table-scroll" style="margin-top:8px;"><table><tr><th>Date</th><th>Description</th>' +
           '<th>Category</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
@@ -1850,7 +1858,7 @@
     return '<div class="card">' + projectSummaryHtml(p, spentAmt) +
       (body ? '<hr class="divider">' + body : '') +
       (txns.length
-        ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--accent);">' +
+        ? '<details style="margin-top:10px;"><summary class="small" style="cursor:pointer;color:var(--link);">' +
           txns.length + ' transaction(s) — show details</summary>' +
           '<div class="table-scroll" style="margin-top:8px;"><table><tr><th>Date</th><th>Description</th>' +
           '<th>Budget line</th><th>Statement</th><th class="num">Amount</th><th></th></tr>' +
