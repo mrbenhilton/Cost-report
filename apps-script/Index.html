@@ -270,16 +270,25 @@
         <textarea id="csv-paste" rows="5" style="margin-top:8px;" placeholder="Date,Description,Amount&#10;01/07/2026,COFFEE SHOP,-4.50"></textarea>
         <div style="margin-top:8px;"><button class="btn" onclick="onPasteCsv()">Use pasted text</button></div>
       </details>
+      <details style="margin-top:10px;">
+        <summary class="small muted" style="cursor:pointer;">…or start the transactions over</summary>
+        <p class="small muted" id="reset-txn-summary" style="margin-bottom:6px;"></p>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0 0 8px;">
+          <input type="checkbox" id="reset-include-manual" style="width:auto;">
+          Also delete expenses added by hand (cash / paid outside this account)
+        </label>
+        <button class="btn danger" id="reset-txn-btn" onclick="onClearTransactions()">Delete recorded transactions</button>
+      </details>
     </div>
 
     <div id="review-step-map" class="card hidden">
       <h2>Check the columns</h2>
       <p class="small muted" style="margin-top:0;">I've guessed which column is which — correct anything that's wrong, then start reconciling.</p>
       <div class="row">
-        <div class="grow"><label for="map-date">Date column</label><select id="map-date"></select></div>
-        <div class="grow"><label for="map-desc">Description column</label><select id="map-desc"></select></div>
+        <div class="grow"><label for="map-date">Date column</label><select id="map-date" onchange="updateMappingCheck()"></select></div>
+        <div class="grow"><label for="map-desc">Description column</label><select id="map-desc" onchange="updateMappingCheck()"></select></div>
         <div class="grow"><label for="map-datefmt">Date format</label>
-          <select id="map-datefmt">
+          <select id="map-datefmt" onchange="updateMappingCheck()">
             <option value="auto">Auto-detect</option>
             <option value="DMY">Day / Month / Year</option>
             <option value="MDY">Month / Day / Year</option>
@@ -289,30 +298,31 @@
       </div>
       <div class="row" style="margin-top:10px;">
         <div class="grow"><label for="map-amountmode">Amount columns</label>
-          <select id="map-amountmode" onchange="renderMappingAmountFields()">
+          <select id="map-amountmode" onchange="renderMappingAmountFields(); updateMappingCheck();">
             <option value="single">One amount column</option>
             <option value="two">Separate “money out” / “money in” columns</option>
           </select>
         </div>
-        <div class="grow" id="map-single-wrap"><label for="map-amount">Amount column</label><select id="map-amount"></select></div>
+        <div class="grow" id="map-single-wrap"><label for="map-amount">Amount column</label><select id="map-amount" onchange="updateMappingCheck()"></select></div>
         <div class="grow" id="map-sign-wrap"><label for="map-sign">In that column…</label>
-          <select id="map-sign">
+          <select id="map-sign" onchange="updateMappingCheck()">
             <option value="negout">money out is negative (most banks)</option>
             <option value="posout">money out is positive</option>
           </select>
         </div>
-        <div class="grow hidden" id="map-debit-wrap"><label for="map-debit">Money out column</label><select id="map-debit"></select></div>
-        <div class="grow hidden" id="map-credit-wrap"><label for="map-credit">Money in column</label><select id="map-credit"></select></div>
-        <div class="grow"><label for="map-notes">Notes / reference column (optional)</label><select id="map-notes"></select></div>
+        <div class="grow hidden" id="map-debit-wrap"><label for="map-debit">Money out column</label><select id="map-debit" onchange="updateMappingCheck()"></select></div>
+        <div class="grow hidden" id="map-credit-wrap"><label for="map-credit">Money in column</label><select id="map-credit" onchange="updateMappingCheck()"></select></div>
+        <div class="grow"><label for="map-notes">Notes / reference column (optional)</label><select id="map-notes" onchange="updateMappingCheck()"></select></div>
       </div>
       <div class="row" style="margin-top:10px; align-items:center;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
-          <input type="checkbox" id="map-skip-income" style="width:auto;">
+          <input type="checkbox" id="map-skip-income" style="width:auto;" onchange="updateMappingCheck()">
           Skip incoming payments (don’t review income)
         </label>
-        <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
-          <input type="checkbox" id="map-skip-transfers" checked style="width:auto;">
-          Skip <span id="map-transfers-count">0</span> internal transfers (pots / savings)
+        <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;"
+               title="Pot moves are reviewed like any other transaction, since project budgets are held in pots. Tick this only to leave them out.">
+          <input type="checkbox" id="map-skip-transfers" style="width:auto;" onchange="updateMappingCheck()">
+          Skip <span id="map-transfers-count">0</span> pot / savings transfers
         </label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-has-header" checked style="width:auto;" onchange="renderMapping()">
@@ -320,6 +330,7 @@
         </label>
       </div>
       <hr class="divider">
+      <div id="map-check" class="notice small hidden"></div>
       <div class="small muted" style="margin-bottom:4px;">Preview (first rows of your file)</div>
       <div class="table-scroll"><table id="map-preview"></table></div>
       <div style="margin-top:14px;">
@@ -418,7 +429,8 @@
   var review = {
     rows: [], filename: '', queue: [], idx: 0,
     saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0,
-    skippedTransfers: 0, typeIdx: -1, transferCount: 0
+    skippedTransfers: 0, typeIdx: -1, transferCount: 0,
+    delimiter: ',', skippedAbove: 0, skippedBelow: 0
   };
   var budgetEditor = { lines: [], replaceProjectId: null };
   var beTotalDirty = false;
@@ -448,9 +460,13 @@
     });
   }
 
-  function showError(msg) {
+  function showError(msg) { showBanner(msg, true); }
+  function showNotice(msg) { showBanner(msg, false); }
+
+  function showBanner(msg, isError) {
     var el = document.getElementById('error');
     el.textContent = msg;
+    el.classList.toggle('error-banner', isError);
     el.classList.remove('hidden');
     setTimeout(function () { el.classList.add('hidden'); }, 8000);
   }
@@ -494,9 +510,10 @@
     });
     if (name === 'report') renderReport();
     if (name === 'projects') renderProjects();
+    if (name === 'review') renderResetSummary();
   }
 
-  function renderAll() { renderProjects(); renderReport(); }
+  function renderAll() { renderProjects(); renderReport(); renderResetSummary(); }
 
   // ------------------------------------------------------------ helpers
   function esc(s) {
@@ -1045,7 +1062,10 @@
   }
 
   // ------------------------------------------------------------ CSV parsing
-  function parseCSV(text) {
+  var DELIMITERS = [',', ';', '\t', '|'];
+
+  function parseCSV(text, delim) {
+    delim = delim || ',';
     var rows = [], row = [], field = '', inQ = false;
     for (var i = 0; i < text.length; i++) {
       var c = text[i];
@@ -1054,7 +1074,7 @@
           if (text[i + 1] === '"') { field += '"'; i++; } else { inQ = false; }
         } else { field += c; }
       } else if (c === '"') { inQ = true; }
-      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === delim) { row.push(field); field = ''; }
       else if (c === '\n' || c === '\r') {
         if (c === '\r' && text[i + 1] === '\n') i++;
         row.push(field);
@@ -1067,15 +1087,78 @@
     return rows;
   }
 
+  /** Most common value in a list of numbers, ties broken by the larger value. */
+  function modalCount(counts) {
+    var tally = {}, best = 0, bestN = 0;
+    counts.forEach(function (c) { tally[c] = (tally[c] || 0) + 1; });
+    Object.keys(tally).forEach(function (k) {
+      var n = parseInt(k, 10);
+      if (tally[k] > bestN || (tally[k] === bestN && n > best)) { best = n; bestN = tally[k]; }
+    });
+    return best;
+  }
+
+  /**
+   * Banks export with commas, semicolons, tabs or pipes depending on the bank
+   * and the exporting locale. Parse with each and keep whichever yields the
+   * most columns held consistently across rows — a wrong delimiter collapses
+   * every line into a single unreadable column.
+   */
+  function sniffDelimiter(text) {
+    var sample = text.length > 200000 ? text.slice(0, 200000) : text;
+    var best = ',', bestScore = 0;
+    DELIMITERS.forEach(function (d) {
+      var rows = parseCSV(sample, d);
+      if (!rows.length) return;
+      var counts = rows.map(function (r) { return r.length; });
+      var cols = modalCount(counts);
+      if (cols < 2) return;
+      var consistent = counts.filter(function (c) { return c === cols; }).length / counts.length;
+      var score = cols * consistent;
+      if (score > bestScore) { bestScore = score; best = d; }
+    });
+    return best;
+  }
+
+  /**
+   * Statements often carry title/account lines above the table and totals
+   * below it. Those rows have a different column count from the table itself,
+   * and leaving them in makes row 1 a bogus header and every real row
+   * unreadable. Returns the table rows plus how many lines were dropped.
+   */
+  function trimToTable(rows) {
+    if (rows.length < 2) return { rows: rows, skippedAbove: 0, skippedBelow: 0 };
+    var cols = modalCount(rows.map(function (r) { return r.length; }));
+    if (cols < 2) return { rows: rows, skippedAbove: 0, skippedBelow: 0 };
+    var first = 0, last = rows.length - 1;
+    while (first < rows.length && rows[first].length !== cols) first++;
+    if (first >= rows.length) return { rows: rows, skippedAbove: 0, skippedBelow: 0 };
+    while (last > first && rows[last].length !== cols) last--;
+    return {
+      rows: rows.slice(first, last + 1),
+      skippedAbove: first,
+      skippedBelow: rows.length - 1 - last
+    };
+  }
+
   function parseAmount(raw) {
     var s = String(raw == null ? '' : raw).trim();
     if (!s) return NaN;
-    var neg = /^\(.*\)$/.test(s);
-    s = s.replace(/[()]/g, '');
-    s = s.replace(/[^0-9.,\-]/g, '');
-    if (/,\d{1,2}$/.test(s) && s.indexOf('.') === -1) s = s.replace(',', '.'); // 1234,56
-    else s = s.replace(/,/g, '');
-    if (!s || s === '-' ) return NaN;
+    s = s.replace(/[−‒–—]/g, '-');       // unicode minus / dashes
+    var neg = /^\(.*\)$/.test(s) || /-/.test(s) || /\bdr\b/i.test(s);  // (49.99), 49.99-, 49.99 DR
+    if (/\bcr\b/i.test(s)) neg = false;                      // 49.99 CR is money in
+    s = s.replace(/[^0-9.,]/g, '');
+    var lastDot = s.lastIndexOf('.'), lastComma = s.lastIndexOf(',');
+    if (lastDot !== -1 && lastComma !== -1) {
+      // whichever separator comes last is the decimal point (1.234,56 vs 1,234.56)
+      if (lastComma > lastDot) s = s.replace(/\./g, '').replace(',', '.');
+      else s = s.replace(/,/g, '');
+    } else if (lastComma !== -1) {
+      if (/^\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, '');   // 1,234,567
+      else if (/,\d{1,2}$/.test(s)) s = s.replace(',', '.');       // 1234,56
+      else s = s.replace(/,/g, '');
+    }
+    if (!s) return NaN;
     var n = parseFloat(s);
     if (isNaN(n)) return NaN;
     return neg ? -n : n;
@@ -1083,9 +1166,31 @@
 
   var MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 
-  function parseDate(raw, fmt) {
+  /**
+   * Strips everything around the calendar date itself: a clock time (many
+   * banks put "05/03/2024 14:22:31" in one column), a weekday prefix, and
+   * ordinal suffixes like 5th.
+   */
+  function normaliseDateText(raw) {
     var s = String(raw == null ? '' : raw).trim();
+    s = s.replace(/^(mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)[a-z]*\.?[\s,]+/i, '');
+    s = s.replace(/[T,]?\s*\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*(am|pm)?\s*(z|utc|gmt|bst|[+-]\d{2}:?\d{2})?\s*$/i, '');
+    s = s.replace(/(\d{1,2})(st|nd|rd|th)\b/i, '$1');
+    return s.trim().replace(/[,T]$/, '').trim();
+  }
+
+  function parseDate(raw, fmt) {
+    var s = normaliseDateText(raw);
     if (!s) return null;
+    var iso = s.match(/^(\d{4})(\d{2})(\d{2})$/);                 // 20240305
+    if (iso) return isoDate(iso[1], iso[2], iso[3]);
+    if (/^\d{5}$/.test(s)) {                                       // Excel serial date
+      var serial = parseInt(s, 10);
+      if (serial > 20000 && serial < 60000) {
+        var d = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+        return isoDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+      }
+    }
     var m = s.match(/^(\d{1,2})[ \-\/]([A-Za-z]{3,})[ \-\/,]+(\d{2,4})$/) ||
             s.match(/^([A-Za-z]{3,})[ \-\/]+(\d{1,2})[ \-\/,]+(\d{2,4})$/);
     if (m) {
@@ -1115,7 +1220,7 @@
   function detectDateFormat(values) {
     var sawFirstOver12 = false, sawSecondOver12 = false;
     values.forEach(function (v) {
-      var parts = String(v || '').trim().split(/[\/\-. ]+/).filter(Boolean);
+      var parts = normaliseDateText(v).split(/[\/\-. ]+/).filter(Boolean);
       if (parts.length !== 3 || parts[0].length === 4) return;
       var a = parseInt(parts[0], 10), b = parseInt(parts[1], 10);
       if (a > 12) sawFirstOver12 = true;
@@ -1155,9 +1260,15 @@
   }
 
   function loadCsvText(text) {
-    var rows = parseCSV(text);
+    text = String(text).replace(/^﻿/, '');
+    var delim = sniffDelimiter(text);
+    var trimmed = trimToTable(parseCSV(text, delim));
+    var rows = trimmed.rows;
     if (rows.length < 1) { showError('That file appears to be empty.'); return; }
     review.rows = rows;
+    review.delimiter = delim;
+    review.skippedAbove = trimmed.skippedAbove;
+    review.skippedBelow = trimmed.skippedBelow;
     document.getElementById('review-step-upload').classList.add('hidden');
     document.getElementById('review-step-done').classList.add('hidden');
     document.getElementById('review-step-map').classList.remove('hidden');
@@ -1174,9 +1285,50 @@
     return -1;
   }
 
-  /** Internal moves between the account's own pots/spaces — not real spend. */
+  /**
+   * Moves between the account's own pots/spaces. These are NOT ignored by
+   * default — project budgets are parked in interest-bearing pots, so a pot
+   * move is usually a real budget event worth reviewing.
+   */
   function isInternalTransfer(value) {
     return /pot\s*transfer|internal\s*transfer/i.test(String(value || ''));
+  }
+
+  function columnValues(idx, hasHeader) {
+    if (idx < 0) return [];
+    return review.rows.slice(hasHeader ? 1 : 0, hasHeader ? 41 : 40)
+      .map(function (r) { return r[idx]; })
+      .filter(function (v) { return String(v == null ? '' : v).trim() !== ''; });
+  }
+
+  /** Share of a column's sampled values that read as dates (0 when empty). */
+  function dateScore(idx, hasHeader) {
+    var vals = columnValues(idx, hasHeader);
+    if (!vals.length) return 0;
+    var hits = vals.filter(function (v) { return !!parseDate(v, 'DMY'); }).length;
+    return hits / vals.length;
+  }
+
+  /** Share that read as money — a bare integer id column scores nothing. */
+  function amountScore(idx, hasHeader) {
+    var vals = columnValues(idx, hasHeader);
+    if (!vals.length) return 0;
+    var hits = vals.filter(function (v) {
+      var s = String(v).trim();
+      return !isNaN(parseAmount(s)) && /[.,]\d{1,2}\b|[-−()£$€]|\bcr\b|\bdr\b/i.test(s);
+    }).length;
+    return hits / vals.length;
+  }
+
+  /** Falls back to whichever column actually holds the data when the header guess misses. */
+  function bestColumn(headers, scorer, hasHeader, exclude) {
+    var bestIdx = -1, best = 0;
+    for (var i = 0; i < headers.length; i++) {
+      if (exclude.indexOf(i) !== -1) continue;
+      var s = scorer(i, hasHeader);
+      if (s > best) { best = s; bestIdx = i; }
+    }
+    return best >= 0.6 ? bestIdx : -1;
   }
 
   function renderMapping() {
@@ -1197,6 +1349,18 @@
     var gCredit = guessColumn(headers, [/credit/, /money in/, /paid in/, /deposit/, /in\b/]);
     var gAmount = guessColumn(headers, [/^amount$/, /amount/, /value/, /^sum$/]);
     var gNotes = guessColumn(headers, [/notes/, /note\b/, /reference/, /memo/]);
+
+    // A header match that holds no usable data is worse than no match at all,
+    // so check the guesses against the rows and re-pick when they come up empty.
+    if (gDate === -1 || dateScore(gDate, hasHeader) < 0.6) {
+      var byData = bestColumn(headers, dateScore, hasHeader, []);
+      if (byData !== -1) gDate = byData;
+    }
+    if (gAmount === -1 || amountScore(gAmount, hasHeader) < 0.6) {
+      var amtByData = bestColumn(headers, amountScore, hasHeader, [gDate]);
+      if (amtByData !== -1 && (gDebit === -1 || gCredit === -1)) gAmount = amtByData;
+    }
+
     fill('map-date', gDate === -1 ? 0 : gDate, false);
     fill('map-desc', gDesc === -1 ? Math.min(1, headers.length - 1) : gDesc, false);
     fill('map-amount', gAmount === -1 ? headers.length - 1 : gAmount, false);
@@ -1208,7 +1372,7 @@
     renderMappingAmountFields();
     document.getElementById('map-datefmt').value = 'auto';
 
-    // internal pot/savings transfers (e.g. Monzo pots) can be skipped in bulk
+    // pot/savings moves are offered as an opt-in skip, off by default
     review.typeIdx = guessColumn(headers, [/^type$/, /transaction\s*type/]);
     var transferCount = 0;
     if (review.typeIdx !== -1) {
@@ -1226,6 +1390,111 @@
       html += '<tr>' + headers.map(function (_, i) { return '<td>' + esc(r[i]) + '</td>'; }).join('') + '</tr>';
     });
     document.getElementById('map-preview').innerHTML = html;
+    updateMappingCheck();
+  }
+
+  function currentMapping() {
+    return {
+      hasHeader: document.getElementById('map-has-header').checked,
+      dateIdx: parseInt(document.getElementById('map-date').value, 10),
+      descIdx: parseInt(document.getElementById('map-desc').value, 10),
+      mode: document.getElementById('map-amountmode').value,
+      amountIdx: parseInt(document.getElementById('map-amount').value, 10),
+      debitIdx: parseInt(document.getElementById('map-debit').value, 10),
+      creditIdx: parseInt(document.getElementById('map-credit').value, 10),
+      sign: document.getElementById('map-sign').value,
+      notesIdx: parseInt(document.getElementById('map-notes').value, 10),
+      skipIncome: document.getElementById('map-skip-income').checked,
+      skipTransfers: document.getElementById('map-skip-transfers').checked && review.typeIdx >= 0,
+      fmtChoice: document.getElementById('map-datefmt').value
+    };
+  }
+
+  /**
+   * Reads every data row through a mapping. Shared by the live check on the
+   * mapping screen and by startReview, so what the check reports is exactly
+   * what the review will do.
+   */
+  function scanRows(map) {
+    var dataRows = review.rows.slice(map.hasHeader ? 1 : 0);
+    var fmt = map.fmtChoice === 'auto'
+      ? detectDateFormat(dataRows.map(function (r) { return r[map.dateIdx]; }))
+      : map.fmtChoice;
+    var out = {
+      fmt: fmt, total: dataRows.length, items: [], blank: 0, invalid: 0,
+      badDate: 0, badAmount: 0, badDateSample: '', badAmountSample: '',
+      income: 0, transfers: 0
+    };
+    dataRows.forEach(function (r) {
+      if (map.skipTransfers && isInternalTransfer(r[review.typeIdx])) { out.transfers++; return; }
+      var desc = String(r[map.descIdx] == null ? '' : r[map.descIdx]).trim();
+      var amountOut;
+      if (map.mode === 'two') {
+        var deb = map.debitIdx >= 0 ? parseAmount(r[map.debitIdx]) : NaN;
+        var cred = map.creditIdx >= 0 ? parseAmount(r[map.creditIdx]) : NaN;
+        if (!isNaN(deb) && deb !== 0) amountOut = Math.abs(deb);
+        else if (!isNaN(cred) && cred !== 0) amountOut = -Math.abs(cred);
+        else amountOut = NaN;
+      } else {
+        var n = parseAmount(r[map.amountIdx]);
+        amountOut = map.sign === 'negout' ? -n : n;   // normalise: positive = money out
+      }
+      var date = parseDate(r[map.dateIdx], fmt);
+      if (!desc && isNaN(amountOut)) { out.blank++; return; }   // blank row
+      if (isNaN(amountOut) || !date) {
+        out.invalid++;
+        if (!date) {
+          out.badDate++;
+          if (!out.badDateSample) out.badDateSample = String(r[map.dateIdx] == null ? '' : r[map.dateIdx]).trim();
+        }
+        if (isNaN(amountOut)) {
+          out.badAmount++;
+          var rawAmt = map.mode === 'two' ? r[map.debitIdx] : r[map.amountIdx];
+          if (!out.badAmountSample) out.badAmountSample = String(rawAmt == null ? '' : rawAmt).trim();
+        }
+        return;
+      }
+      if (amountOut <= 0 && map.skipIncome) { out.income++; return; }
+      out.items.push({
+        date: date, description: desc, amount: amountOut,
+        note: map.notesIdx >= 0 ? String(r[map.notesIdx] == null ? '' : r[map.notesIdx]).trim() : ''
+      });
+    });
+    return out;
+  }
+
+  /** Explains what a mapping can't read, in the words of the file itself. */
+  function unreadableDetail(scan) {
+    var bits = [];
+    if (scan.badDate) {
+      bits.push('the date column' +
+        (scan.badDateSample ? ' (couldn’t read “' + scan.badDateSample + '”)' : ' is empty or not a date'));
+    }
+    if (scan.badAmount) {
+      bits.push('the amount column' +
+        (scan.badAmountSample ? ' (couldn’t read “' + scan.badAmountSample + '”)' : ' is empty or not a number'));
+    }
+    return bits.join(' and ');
+  }
+
+  function updateMappingCheck() {
+    var el = document.getElementById('map-check');
+    if (!el) return;
+    var scan = scanRows(currentMapping());
+    var readable = scan.items.length + scan.income + scan.transfers;
+    var parts = [];
+    if (review.skippedAbove) parts.push(review.skippedAbove + ' heading line(s) above the table were ignored.');
+    if (review.skippedBelow) parts.push(review.skippedBelow + ' line(s) below the table were ignored.');
+    if (!scan.invalid) {
+      el.className = 'notice small';
+      el.textContent = readable + ' of ' + (scan.total - scan.blank) + ' rows read cleanly. ' + parts.join(' ');
+    } else {
+      el.className = 'notice error-banner small';
+      el.textContent = scan.invalid + ' of ' + (scan.total - scan.blank) + ' rows can’t be read — ' +
+        unreadableDetail(scan) + '. Fix the columns above' +
+        (scan.badDate ? ' or set the date format explicitly' : '') + '. ' + parts.join(' ');
+    }
+    el.classList.remove('hidden');
   }
 
   function renderMappingAmountFields() {
@@ -1239,23 +1508,8 @@
   function startReview() {
     var errEl = document.getElementById('map-error');
     errEl.classList.add('hidden');
-    var hasHeader = document.getElementById('map-has-header').checked;
-    var dateIdx = parseInt(document.getElementById('map-date').value, 10);
-    var descIdx = parseInt(document.getElementById('map-desc').value, 10);
-    var mode = document.getElementById('map-amountmode').value;
-    var amountIdx = parseInt(document.getElementById('map-amount').value, 10);
-    var debitIdx = parseInt(document.getElementById('map-debit').value, 10);
-    var creditIdx = parseInt(document.getElementById('map-credit').value, 10);
-    var sign = document.getElementById('map-sign').value;
-    var skipIncome = document.getElementById('map-skip-income').checked;
-    var notesIdx = parseInt(document.getElementById('map-notes').value, 10);
-    var skipTransfers = document.getElementById('map-skip-transfers').checked && review.typeIdx >= 0;
-    var fmtChoice = document.getElementById('map-datefmt').value;
 
-    var dataRows = review.rows.slice(hasHeader ? 1 : 0);
-    if (fmtChoice === 'auto') {
-      fmtChoice = detectDateFormat(dataRows.map(function (r) { return r[dateIdx]; }));
-    }
+    var scan = scanRows(currentMapping());
 
     var known = {};
     app.transactions.forEach(function (t) { known[t.hash] = true; });
@@ -1264,49 +1518,38 @@
     review.queue = [];
     review.idx = 0;
     review.saved = 0; review.skipped = 0; review.duplicates = 0;
-    review.skippedIncome = 0; review.skippedTransfers = 0;
-    var invalid = 0;
+    review.skippedIncome = scan.income; review.skippedTransfers = scan.transfers;
 
-    dataRows.forEach(function (r) {
-      if (skipTransfers && isInternalTransfer(r[review.typeIdx])) { review.skippedTransfers++; return; }
-      var desc = String(r[descIdx] == null ? '' : r[descIdx]).trim();
-      var amountOut;
-      if (mode === 'two') {
-        var deb = debitIdx >= 0 ? parseAmount(r[debitIdx]) : NaN;
-        var cred = creditIdx >= 0 ? parseAmount(r[creditIdx]) : NaN;
-        if (!isNaN(deb) && deb !== 0) amountOut = Math.abs(deb);
-        else if (!isNaN(cred) && cred !== 0) amountOut = -Math.abs(cred);
-        else amountOut = NaN;
-      } else {
-        var n = parseAmount(r[amountIdx]);
-        amountOut = sign === 'negout' ? -n : n;   // normalise: positive = money out
-      }
-      var date = parseDate(r[dateIdx], fmtChoice);
-      if (!desc && isNaN(amountOut)) return;      // blank row
-      if (isNaN(amountOut) || !date) { invalid++; return; }
-      if (amountOut <= 0 && skipIncome) { review.skippedIncome++; return; }
-
-      var key = date + '|' + desc.toLowerCase().replace(/\s+/g, ' ') + '|' + amountOut.toFixed(2);
+    scan.items.forEach(function (item) {
+      var key = item.date + '|' + item.description.toLowerCase().replace(/\s+/g, ' ') + '|' + item.amount.toFixed(2);
       occ[key] = (occ[key] || 0) + 1;
       var hash = hashTxn(key + '|' + occ[key]);
       if (known[hash]) { review.duplicates++; return; }
       review.queue.push({
-        hash: hash, date: date, description: desc, amount: amountOut,
-        note: notesIdx >= 0 ? String(r[notesIdx] == null ? '' : r[notesIdx]).trim() : ''
+        hash: hash, date: item.date, description: item.description,
+        amount: item.amount, note: item.note
       });
     });
 
     if (!review.queue.length) {
-      var msg = 'Nothing new to review in this file.';
-      if (review.duplicates) msg += ' ' + review.duplicates + ' transaction(s) were already recorded.';
-      if (review.skippedTransfers) msg += ' ' + review.skippedTransfers + ' internal transfer(s) were skipped.';
-      if (review.skippedIncome) msg += ' ' + review.skippedIncome + ' incoming payment(s) were skipped.';
-      if (invalid) msg += ' ' + invalid + ' row(s) couldn’t be read — check the column mapping.';
+      var msg;
+      if (scan.invalid && !scan.items.length) {
+        // nothing got through at all: the mapping is the story, not the file
+        msg = 'None of the ' + scan.invalid + ' row(s) in this file could be read — ' +
+          unreadableDetail(scan) + '. Check the column choices above' +
+          (scan.badDate ? ' and try setting the date format instead of Auto-detect' : '') + '.';
+      } else {
+        msg = 'Nothing new to review in this file.';
+        if (review.duplicates) msg += ' ' + review.duplicates + ' transaction(s) were already recorded.';
+        if (review.skippedTransfers) msg += ' ' + review.skippedTransfers + ' pot/savings transfer(s) were skipped.';
+        if (review.skippedIncome) msg += ' ' + review.skippedIncome + ' incoming payment(s) were skipped.';
+        if (scan.invalid) msg += ' ' + scan.invalid + ' row(s) couldn’t be read — ' + unreadableDetail(scan) + '.';
+      }
       errEl.textContent = msg;
       errEl.classList.remove('hidden');
       return;
     }
-    if (invalid) showError(invalid + ' row(s) couldn’t be read and were left out.');
+    if (scan.invalid) showError(scan.invalid + ' row(s) couldn’t be read and were left out — ' + unreadableDetail(scan) + '.');
 
     document.getElementById('review-step-map').classList.add('hidden');
     document.getElementById('review-step-cards').classList.remove('hidden');
@@ -1647,7 +1890,7 @@
       var bits = ['Recorded ' + review.saved + ' transaction(s).'];
       if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
       if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
-      if (review.skippedTransfers) bits.push(review.skippedTransfers + ' internal pot/savings transfer(s) were left out.');
+      if (review.skippedTransfers) bits.push(review.skippedTransfers + ' pot/savings transfer(s) were left out at your request.');
       if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
       document.getElementById('review-summary').textContent = bits.join(' ');
       renderAll();
@@ -1657,12 +1900,58 @@
   }
 
   function resetReview() {
-    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, skippedTransfers: 0, typeIdx: -1, transferCount: 0 };
+    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, skippedTransfers: 0, typeIdx: -1, transferCount: 0, delimiter: ',', skippedAbove: 0, skippedBelow: 0 };
     document.getElementById('csv-file').value = '';
     document.getElementById('review-step-map').classList.add('hidden');
     document.getElementById('review-step-cards').classList.add('hidden');
     document.getElementById('review-step-done').classList.add('hidden');
     document.getElementById('review-step-upload').classList.remove('hidden');
+    renderResetSummary();
+  }
+
+  var MANUAL_STATEMENT = 'Manual entry';
+
+  function manualTxnCount() {
+    return app.transactions.filter(function (t) { return t.statement === MANUAL_STATEMENT; }).length;
+  }
+
+  function renderResetSummary() {
+    var el = document.getElementById('reset-txn-summary');
+    if (!el || !app.transactions) return;
+    var manual = manualTxnCount();
+    var imported = app.transactions.length - manual;
+    if (!app.transactions.length) {
+      el.textContent = 'No transactions are recorded yet — nothing to clear.';
+    } else if (!imported) {
+      el.textContent = 'Nothing is left from uploaded statements. ' + manual +
+        ' expense(s) added by hand are still stored — tick the box below to clear those too.';
+    } else {
+      el.textContent = imported + ' transaction(s) from uploaded statements are recorded' +
+        (manual ? ', plus ' + manual + ' added by hand (kept unless you tick the box below)' : '') +
+        '. Deleting them leaves your projects and budgets exactly as they are.';
+    }
+    var btn = document.getElementById('reset-txn-btn');
+    if (btn) btn.disabled = !app.transactions.length;
+  }
+
+  function onClearTransactions() {
+    var includeManual = document.getElementById('reset-include-manual').checked;
+    var manual = manualTxnCount();
+    var doomed = includeManual ? app.transactions.length : app.transactions.length - manual;
+    if (!doomed) { showError('There are no ' + (includeManual ? '' : 'imported ') + 'transactions to delete.'); return; }
+    if (!window.confirm('Delete ' + doomed + ' recorded transaction(s)?\n\n' +
+        (includeManual ? 'This includes expenses you added by hand.' :
+          manual ? manual + ' manually added expense(s) will be kept.' : '') +
+        '\nProjects and budgets are not affected. This can’t be undone.')) return;
+    var btn = document.getElementById('reset-txn-btn');
+    btn.disabled = true; btn.textContent = 'Deleting…';
+    run('clearTransactions', includeManual ? 'all' : 'statements').then(function (result) {
+      app.transactions = result.transactions;
+      renderAll();
+      resetReview();
+      showNotice(result.removed + ' transaction(s) deleted. Your projects and budgets are untouched.');
+    }).catch(function (e) { showError(e.message); })
+      .finally(function () { btn.disabled = false; btn.textContent = 'Delete recorded transactions'; });
   }
 
   // ------------------------------------------------------------ report tab

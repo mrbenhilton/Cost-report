@@ -100,12 +100,30 @@ version label and total update.
 1. In your online banking, export the month's statement as **CSV**.
 2. Open the app → **Reconcile statement** → choose the file and give it a
    label like `July 2026`.
-3. Check the column mapping (the app guesses date / description / amount and
-   handles UK & US date formats, separate money-in/money-out columns, etc.).
-   Bank-specific niceties, verified against a real Monzo Business export:
-   - **Internal pot/savings transfers are skipped in bulk** — a checkbox
-     shows how many rows are pot-to-pot moves (via the statement's Type
-     column) so you never review them one by one.
+3. Check the column mapping. The app guesses date / description / amount, and
+   a banner under the preview tells you **how many rows it can actually read
+   before you start** — if a column is wrong it names the value it choked on,
+   so you can fix the mapping instead of hitting a wall halfway through.
+   What it copes with, verified against real Monzo Business, Revolut, Tide,
+   Starling and Barclays exports:
+   - **Any common delimiter** — comma, semicolon, tab or pipe — detected by
+     parsing the file each way and keeping whichever gives consistent columns.
+   - **Title and totals lines** above or below the table (Barclays and others
+     add them) are recognised and ignored rather than being mistaken for the
+     header row.
+   - **Dates with a time attached** (`05/03/2024 14:22:31`,
+     `2026-03-05 14:22:31`, ISO timestamps), weekday prefixes, `5th March`,
+     `20240305` and Excel serial numbers all read correctly, on top of the
+     usual UK/US day-month ordering.
+   - **Amounts in any dress**: `(49.99)`, `49.99-`, `49.99 DR/CR`, a Unicode
+     minus, `£`/`$`/`€` symbols, and both `1,234.56` and `1.234,56` grouping.
+   - If a header name misleads (a "Date" column holding something else), the
+     guess is **checked against the rows themselves** and re-picked from
+     whichever column actually holds dates or money.
+   - **Pot / savings transfers are reviewed like anything else.** Project
+     budgets often sit in interest-bearing pots, so a pot move is a real
+     budget event. A checkbox counts them and can leave them out, but it is
+     **off by default**.
    - A **notes/reference column** (e.g. Monzo's "Notes and #tags") is
      picked up automatically: the note is shown on each card and prefills
      the "what was this for?" field — handy when it holds invoice numbers.
@@ -139,6 +157,12 @@ version label and total update.
 **Re-uploading is safe.** Every transaction gets a fingerprint (date +
 description + amount), so uploading the same statement twice never creates
 duplicates — already-recorded transactions are silently skipped.
+
+**Starting the transactions over.** If a run of imports went in wrong, open
+**Reconcile statement → …or start the transactions over**. It deletes
+recorded transactions and leaves projects, budget lines and settings
+untouched, so you keep every budget you've uploaded. Expenses you added by
+hand are kept too unless you tick the box to include them.
 
 ## The cost report
 
@@ -184,7 +208,9 @@ Everything is in your Google Sheet:
 
 You can open the sheet any time (there's an *Open spreadsheet* link in the
 app header), build your own pivot tables, or fix a typo directly in a cell.
-Just don't rename the tabs or the header row.
+Just don't rename the tabs or the header row. Deleting rows from
+`Transactions` by hand is also fine — that's all the in-app reset does — but
+leave `Projects` and `Budget Lines` alone unless you mean to lose a budget.
 
 ## Updating the app later
 

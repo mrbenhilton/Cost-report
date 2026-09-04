@@ -32,6 +32,9 @@ var TXN_HEADERS = [
 ];
 var SETTINGS_HEADERS = ['Key', 'Value'];
 
+/** Statement label used for expenses entered by hand rather than imported. */
+var MANUAL_STATEMENT = 'Manual entry';
+
 /** Serves the web app UI. */
 function doGet() {
   var template = HtmlService.createTemplateFromFile('Index');
@@ -359,6 +362,30 @@ function saveTransactions(txns) {
       d.sheet.getRange(d.sheet.getLastRow() + 1, 1, rows.length, width).setValues(rows);
     }
     return { saved: rows.length, duplicates: duplicates };
+  });
+}
+
+/**
+ * Wipes recorded transactions so a messy set of statement uploads can be
+ * started over. Projects, budgets and settings are untouched.
+ *
+ * scope 'statements' (the default) keeps manually added expenses — those
+ * have no bank row to re-import — and clears everything that came from an
+ * uploaded statement. scope 'all' clears manual entries too.
+ */
+function clearTransactions(scope) {
+  var keepManual = String(scope || 'statements') !== 'all';
+  return withLock_(function () {
+    var d = readRows_(SHEET_TRANSACTIONS, TXN_HEADERS);
+    var removed = 0;
+    for (var i = d.rows.length - 1; i >= 0; i--) {
+      var v = d.rows[i].values;
+      if (!v[d.col['Hash']]) continue;
+      if (keepManual && String(v[d.col['Statement']] || '') === MANUAL_STATEMENT) continue;
+      d.sheet.deleteRow(d.rows[i].rowNumber);
+      removed++;
+    }
+    return { removed: removed, transactions: listTransactions_() };
   });
 }
 
