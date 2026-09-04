@@ -172,11 +172,16 @@ version label and total update.
 description + amount), so uploading the same statement twice never creates
 duplicates — already-recorded transactions are silently skipped.
 
-**Starting the transactions over.** If a run of imports went in wrong, open
-**Reconcile statement → …or start the transactions over**. It deletes
-recorded transactions and leaves projects, budget lines and settings
-untouched, so you keep every budget you've uploaded. Expenses you added by
-hand are kept too unless you tick the box to include them.
+**Starting over.** Both resets live under **Reconcile statement → …or start
+the transactions over**:
+
+- **Delete recorded transactions** — clears the imports and leaves projects,
+  budget lines and settings untouched, so you keep every budget you've
+  uploaded. Expenses added by hand are kept too unless you tick the box.
+- **Wipe everything** — a clean break: every project, every budget and all
+  its lines, and every transaction. Currency and VAT settings survive, and
+  Company Overheads is recreated empty. It asks you to type `ERASE`, and the
+  server refuses the call without it, so it can't happen by accident.
 
 ## The cost report
 

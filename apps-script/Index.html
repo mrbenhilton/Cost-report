@@ -278,6 +278,21 @@
           Also delete expenses added by hand (cash / paid outside this account)
         </label>
         <button class="btn danger" id="reset-txn-btn" onclick="onClearTransactions()">Delete recorded transactions</button>
+        <hr class="divider">
+        <p class="small muted" style="margin-bottom:6px;">
+          <b>Clean break.</b> Deletes <b>everything</b> — every project, every uploaded
+          budget and all its lines, and every transaction — so you can start again from
+          an empty sheet. Your currency and VAT settings are kept, and Company Overheads
+          is recreated empty. <span id="reset-all-summary"></span> This can’t be undone.
+        </p>
+        <div class="row" style="align-items:flex-end;">
+          <div class="grow" style="max-width:220px;">
+            <label for="reset-all-confirm">Type ERASE to confirm</label>
+            <input type="text" id="reset-all-confirm" placeholder="ERASE" autocomplete="off"
+                   oninput="onResetConfirmInput()">
+          </div>
+          <div><button class="btn danger" id="reset-all-btn" onclick="onResetEverything()" disabled>Wipe everything</button></div>
+        </div>
       </details>
     </div>
 
@@ -2015,6 +2030,42 @@
     }
     var btn = document.getElementById('reset-txn-btn');
     if (btn) btn.disabled = !app.transactions.length;
+
+    var allEl = document.getElementById('reset-all-summary');
+    if (allEl) {
+      allEl.textContent = 'Right now that’s ' + clientProjects().length + ' project(s), ' +
+        app.budgetLines.length + ' budget line(s) and ' + app.transactions.length + ' transaction(s).';
+    }
+  }
+
+  function onResetConfirmInput() {
+    var typed = document.getElementById('reset-all-confirm').value.trim().toUpperCase();
+    document.getElementById('reset-all-btn').disabled = typed !== 'ERASE';
+  }
+
+  function onResetEverything() {
+    var input = document.getElementById('reset-all-confirm');
+    if (input.value.trim().toUpperCase() !== 'ERASE') { onResetConfirmInput(); return; }
+    var projects = clientProjects().length;
+    var lines = app.budgetLines.length;
+    var txns = app.transactions.length;
+    if (!window.confirm('Delete everything?\n\n' +
+        projects + ' project(s), ' + lines + ' budget line(s) and ' + txns + ' transaction(s) ' +
+        'will be permanently removed from the spreadsheet.\n\nThis can’t be undone.')) return;
+    var btn = document.getElementById('reset-all-btn');
+    btn.disabled = true; btn.textContent = 'Wiping…';
+    run('resetAllData', 'ERASE').then(function (result) {
+      app = result.data;
+      app.budgetLines = app.budgetLines || [];
+      input.value = '';
+      resetReview();
+      renderAll();
+      showTab('projects');
+      showNotice('Spreadsheet cleared — every project and budget line is gone, along with ' +
+        result.removed.transactions + ' transaction(s). Company Overheads has been recreated ' +
+        'empty. Upload your first budget to begin.');
+    }).catch(function (e) { showError(e.message); })
+      .finally(function () { btn.textContent = 'Wipe everything'; onResetConfirmInput(); });
   }
 
   function onClearTransactions() {

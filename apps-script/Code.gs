@@ -389,6 +389,38 @@ function clearTransactions(scope) {
   });
 }
 
+/**
+ * Deletes every project, budget line and transaction — a clean break.
+ * Settings (currency, VAT rate) are configuration rather than data, so they
+ * survive; the Company Overheads project is recreated immediately because
+ * the app is built around it always existing.
+ *
+ * Guarded by a typed confirmation so a stray call can't empty the sheet.
+ */
+function resetAllData(confirmation) {
+  if (String(confirmation || '').trim().toUpperCase() !== 'ERASE') {
+    throw new Error('Reset not confirmed — type ERASE to wipe everything.');
+  }
+  return withLock_(function () {
+    var removed = {
+      transactions: clearDataRows_(SHEET_TRANSACTIONS, TXN_HEADERS),
+      budgetLines: clearDataRows_(SHEET_LINES, LINE_HEADERS),
+      projects: clearDataRows_(SHEET_PROJECTS, PROJECT_HEADERS)
+    };
+    ensureOverheadsProject_();
+    return { removed: removed, data: getAppData() };
+  });
+}
+
+/** Empties a tab of its data, keeping the header row. Returns rows removed. */
+function clearDataRows_(name, headers) {
+  var s = getSheet_(name, headers);
+  var last = s.sheet.getLastRow();
+  if (last < 2) return 0;
+  s.sheet.deleteRows(2, last - 1);
+  return last - 1;
+}
+
 function deleteTransaction(hash) {
   return withLock_(function () {
     var d = readRows_(SHEET_TRANSACTIONS, TXN_HEADERS);
