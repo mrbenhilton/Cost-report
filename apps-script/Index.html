@@ -319,10 +319,10 @@
           <input type="checkbox" id="map-skip-income" style="width:auto;" onchange="updateMappingCheck()">
           Skip incoming payments (don’t review income)
         </label>
-        <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;"
-               title="Pot moves are reviewed like any other transaction, since project budgets are held in pots. Tick this only to leave them out.">
-          <input type="checkbox" id="map-skip-transfers" style="width:auto;" onchange="updateMappingCheck()">
-          Skip <span id="map-transfers-count">0</span> pot / savings transfers
+        <label id="map-auto-internal-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;"
+               title="Pot moves are recorded so the statement still reconciles, but they never count towards a budget — the real cost is the payment that leaves the account afterwards. Untick to review each one yourself.">
+          <input type="checkbox" id="map-auto-internal" checked style="width:auto;" onchange="updateMappingCheck()">
+          Label <span id="map-transfers-count">0</span> pot / savings transfers as internal transfers (not counted towards budgets)
         </label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-has-header" checked style="width:auto;" onchange="renderMapping()">
@@ -429,7 +429,7 @@
   var review = {
     rows: [], filename: '', queue: [], idx: 0,
     saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0,
-    skippedTransfers: 0, typeIdx: -1, transferCount: 0,
+    typeIdx: -1, transferCount: 0, autoInternal: [], internalRecorded: 0,
     delimiter: ',', skippedAbove: 0, skippedBelow: 0
   };
   var budgetEditor = { lines: [], replaceProjectId: null };
@@ -445,6 +445,14 @@
   var OVERHEADS_ID = 'company-overheads';
   /** Line-ID marker for income entries so they never mix with spend. */
   var INCOME_LINE = '__income__';
+  /**
+   * Money moved between the account and its own pots. Recorded so the
+   * statement still reconciles, but excluded from every budget, spend and
+   * income total: a pot move isn't a cost, and the real cost is the payment
+   * that follows it out of the account.
+   */
+  var INTERNAL_TRANSFER = '__internal__';
+  var INTERNAL_CATEGORY = 'Internal transfer';
 
   var PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
   var PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -526,12 +534,13 @@
     return sign + app.settings.currency + Math.abs(n).toLocaleString(undefined,
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  function isIncomeTxn(t) { return t.lineId === INCOME_LINE; }
+  function isIncomeTxn(t) { return t.lineId === INCOME_LINE && !isInternalTxn(t); }
+  function isInternalTxn(t) { return t.lineId === INTERNAL_TRANSFER; }
 
   function spentByProject() {
     var spent = {};
     app.transactions.forEach(function (t) {
-      if (!t.projectId || isIncomeTxn(t)) return;
+      if (!t.projectId || isIncomeTxn(t) || isInternalTxn(t)) return;
       spent[t.projectId] = (spent[t.projectId] || 0) + t.amount;
     });
     return spent;
@@ -1382,7 +1391,7 @@
     }
     review.transferCount = transferCount;
     document.getElementById('map-transfers-count').textContent = String(transferCount);
-    document.getElementById('map-skip-transfers-wrap').classList.toggle('hidden', !transferCount);
+    document.getElementById('map-auto-internal-wrap').classList.toggle('hidden', !transferCount);
 
     var preview = review.rows.slice(0, hasHeader ? 6 : 5);
     var html = '<tr>' + headers.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr>';
@@ -1405,7 +1414,7 @@
       sign: document.getElementById('map-sign').value,
       notesIdx: parseInt(document.getElementById('map-notes').value, 10),
       skipIncome: document.getElementById('map-skip-income').checked,
-      skipTransfers: document.getElementById('map-skip-transfers').checked && review.typeIdx >= 0,
+      autoInternal: document.getElementById('map-auto-internal').checked && review.typeIdx >= 0,
       fmtChoice: document.getElementById('map-datefmt').value
     };
   }
@@ -1426,7 +1435,7 @@
       income: 0, transfers: 0
     };
     dataRows.forEach(function (r) {
-      if (map.skipTransfers && isInternalTransfer(r[review.typeIdx])) { out.transfers++; return; }
+      var isTransfer = map.autoInternal && isInternalTransfer(r[review.typeIdx]);
       var desc = String(r[map.descIdx] == null ? '' : r[map.descIdx]).trim();
       var amountOut;
       if (map.mode === 'two') {
@@ -1454,9 +1463,10 @@
         }
         return;
       }
-      if (amountOut <= 0 && map.skipIncome) { out.income++; return; }
+      if (isTransfer) out.transfers++;
+      else if (amountOut <= 0 && map.skipIncome) { out.income++; return; }
       out.items.push({
-        date: date, description: desc, amount: amountOut,
+        date: date, description: desc, amount: amountOut, internal: isTransfer,
         note: map.notesIdx >= 0 ? String(r[map.notesIdx] == null ? '' : r[map.notesIdx]).trim() : ''
       });
     });
@@ -1481,8 +1491,12 @@
     var el = document.getElementById('map-check');
     if (!el) return;
     var scan = scanRows(currentMapping());
-    var readable = scan.items.length + scan.income + scan.transfers;
+    var readable = scan.items.length + scan.income;
     var parts = [];
+    if (scan.transfers) {
+      parts.push(scan.transfers + ' of them are pot/savings moves, recorded as internal transfers; ' +
+        (scan.items.length - scan.transfers) + ' left to review.');
+    }
     if (review.skippedAbove) parts.push(review.skippedAbove + ' heading line(s) above the table were ignored.');
     if (review.skippedBelow) parts.push(review.skippedBelow + ' line(s) below the table were ignored.');
     if (!scan.invalid) {
@@ -1505,6 +1519,46 @@
     document.getElementById('map-credit-wrap').classList.toggle('hidden', !two);
   }
 
+  /**
+   * A pot move, stored so the statement still reconciles but marked so no
+   * budget, spend or income total ever picks it up.
+   */
+  function internalTxn(hash, item, statement) {
+    return {
+      hash: hash, date: item.date, description: item.description,
+      amount: item.amount, gross: item.amount, vat: 0,
+      projectId: '', projectName: '',
+      lineId: INTERNAL_TRANSFER, lineName: INTERNAL_CATEGORY, category: INTERNAL_CATEGORY,
+      purpose: item.note || '', statement: statement
+    };
+  }
+
+  /** Saves the auto-labelled pot moves in one go, so there's nothing to click through. */
+  function recordAutoInternal() {
+    if (!review.autoInternal.length) return Promise.resolve();
+    return run('saveTransactions', review.autoInternal).then(function () {
+      review.autoInternal.forEach(function (t) { app.transactions.push(t); });
+      review.internalRecorded = review.autoInternal.length;
+      review.autoInternal = [];
+    }).catch(function (e) {
+      showError('Could not record the pot transfers — ' + (e && e.message ? e.message : e) +
+        '. They’ll be offered again next time you upload this statement.');
+      review.autoInternal = [];
+    });
+  }
+
+  function reviewSummaryText() {
+    var bits = ['Recorded ' + review.saved + ' transaction(s).'];
+    if (review.internalRecorded) {
+      bits.push(review.internalRecorded + ' pot/savings transfer(s) were logged as internal transfers — ' +
+        'they don’t count towards any budget.');
+    }
+    if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
+    if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
+    if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
+    return bits.join(' ');
+  }
+
   function startReview() {
     var errEl = document.getElementById('map-error');
     errEl.classList.add('hidden');
@@ -1518,20 +1572,27 @@
     review.queue = [];
     review.idx = 0;
     review.saved = 0; review.skipped = 0; review.duplicates = 0;
-    review.skippedIncome = scan.income; review.skippedTransfers = scan.transfers;
+    review.skippedIncome = scan.income;
+    review.autoInternal = [];
+    review.internalRecorded = 0;
 
+    var statement = document.getElementById('statement-label').value.trim();
     scan.items.forEach(function (item) {
       var key = item.date + '|' + item.description.toLowerCase().replace(/\s+/g, ' ') + '|' + item.amount.toFixed(2);
       occ[key] = (occ[key] || 0) + 1;
       var hash = hashTxn(key + '|' + occ[key]);
       if (known[hash]) { review.duplicates++; return; }
+      if (item.internal) {
+        review.autoInternal.push(internalTxn(hash, item, statement));
+        return;
+      }
       review.queue.push({
         hash: hash, date: item.date, description: item.description,
         amount: item.amount, note: item.note
       });
     });
 
-    if (!review.queue.length) {
+    if (!review.queue.length && !review.autoInternal.length) {
       var msg;
       if (scan.invalid && !scan.items.length) {
         // nothing got through at all: the mapping is the story, not the file
@@ -1541,7 +1602,6 @@
       } else {
         msg = 'Nothing new to review in this file.';
         if (review.duplicates) msg += ' ' + review.duplicates + ' transaction(s) were already recorded.';
-        if (review.skippedTransfers) msg += ' ' + review.skippedTransfers + ' pot/savings transfer(s) were skipped.';
         if (review.skippedIncome) msg += ' ' + review.skippedIncome + ' incoming payment(s) were skipped.';
         if (scan.invalid) msg += ' ' + scan.invalid + ' row(s) couldn’t be read — ' + unreadableDetail(scan) + '.';
       }
@@ -1552,8 +1612,17 @@
     if (scan.invalid) showError(scan.invalid + ' row(s) couldn’t be read and were left out — ' + unreadableDetail(scan) + '.');
 
     document.getElementById('review-step-map').classList.add('hidden');
-    document.getElementById('review-step-cards').classList.remove('hidden');
-    renderReviewCard();
+    recordAutoInternal().then(function () {
+      if (!review.queue.length) {
+        // the file held nothing but pot moves — nothing left to decide
+        document.getElementById('review-step-done').classList.remove('hidden');
+        document.getElementById('review-summary').textContent = reviewSummaryText();
+        renderAll();
+        return;
+      }
+      document.getElementById('review-step-cards').classList.remove('hidden');
+      renderReviewCard();
+    });
   }
 
   function renderReviewCard() {
@@ -1650,6 +1719,7 @@
       return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
     }).join('') +
       (oh ? '<option value="' + oh.id + '">Company Overheads (other income)</option>' : '') +
+      '<option value="' + INTERNAL_TRANSFER + '">Internal transfer (out of a pot — not income)</option>' +
       '<option value="' + NO_PROJECT + '">Ignore (not project income)</option>';
   }
 
@@ -1701,6 +1771,8 @@
       var projectId = rows[i].querySelector('.is-proj').value;
       var amount = parseFloat(rows[i].querySelector('.is-amt').value);
       if (isNaN(amount) || amount <= 0) return null;
+      // a pot move is the whole transaction or none of it — it can't be part of a split
+      if (projectId === INTERNAL_TRANSFER) return null;
       parts.push({ projectId: projectId === NO_PROJECT ? '' : projectId, amount: amount });
     }
     var sum = parts.reduce(function (s, p) { return s + p.amount; }, 0);
@@ -1713,6 +1785,7 @@
     sel.innerHTML =
       clientProjects().map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') +
       (oh ? '<option value="' + oh.id + '">Company Overheads (company expense)</option>' : '') +
+      '<option value="' + INTERNAL_TRANSFER + '">Internal transfer (pot / savings — not counted)</option>' +
       '<option value="' + NO_PROJECT + '">Ignore (personal / transfer)</option>' +
       '<option value="' + NEW_PROJECT + '">＋ New project…</option>';
   }
@@ -1724,11 +1797,13 @@
 
     var lineWrap = document.getElementById('rv-line-wrap');
     var lineSel = document.getElementById('rv-line');
-    var lines = (val && val !== NO_PROJECT && val !== NEW_PROJECT) ? linesForProject(val) : [];
+    var lines = (val && val !== NO_PROJECT && val !== NEW_PROJECT && val !== INTERNAL_TRANSFER)
+      ? linesForProject(val) : [];
     if (!lines.length) {
       lineWrap.classList.add('hidden');
       lineSel.innerHTML = '';
-      document.getElementById('rv-category-wrap').classList.remove('hidden');
+      // an internal transfer has no category to give — it isn't a cost
+      document.getElementById('rv-category-wrap').classList.toggle('hidden', val === INTERNAL_TRANSFER);
       return;
     }
     lineSel.innerHTML = lineOptionsHtml(lines);
@@ -1782,8 +1857,17 @@
 
   function saveCurrentTxn() {
     var t = review.queue[review.idx];
-    if (t.amount < 0) { saveIncomeSplit(t); return; }
+    var isIncome = t.amount < 0;
     var projSel = document.getElementById('rv-project').value;
+    // the project select is hidden on income cards, so only trust it on spend
+    if (!isIncome && projSel === INTERNAL_TRANSFER) { saveInternalTxn(t); return; }
+    if (isIncome) {
+      var incomeRows = document.querySelectorAll('#rv-income-rows .income-part');
+      if (incomeRows.length === 1 && incomeRows[0].querySelector('.is-proj').value === INTERNAL_TRANSFER) {
+        saveInternalTxn(t); return;
+      }
+      saveIncomeSplit(t); return;
+    }
     if (projSel === NEW_PROJECT) { showError('Create the new project first (or pick an existing one).'); return; }
     var proj = app.projects.filter(function (p) { return p.id === projSel; })[0];
 
@@ -1839,12 +1923,38 @@
     advanceReview();
   }
 
+  /** Records a pot move: kept on the statement, counted against nothing. */
+  function saveInternalTxn(t) {
+    var txn = internalTxn(t.hash, {
+      date: t.date, description: t.description, amount: t.amount,
+      note: document.getElementById('rv-purpose').value.trim() || t.note
+    }, document.getElementById('statement-label').value.trim());
+    var saveBtn = document.getElementById('rv-save');
+    var skipBtn = document.getElementById('rv-skip');
+    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    run('saveTransactions', [txn]).then(function () {
+      app.transactions.push(txn);
+      review.saved++;
+      advanceReview();
+    }).catch(function (e) {
+      var el = document.getElementById('rv-error');
+      el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
+      el.classList.remove('hidden');
+    }).finally(function () {
+      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
+    });
+  }
+
   function saveIncomeSplit(t) {
     var net = currentCardNetTotal();
     var parts = readIncomeSplit(net);
     if (!parts) {
       var el = document.getElementById('rv-error');
-      el.textContent = 'The split needs positive amounts that add up to ' + fmt(net) + '.';
+      var hasInternal = [].some.call(document.querySelectorAll('#rv-income-rows .is-proj'),
+        function (s) { return s.value === INTERNAL_TRANSFER; });
+      el.textContent = hasInternal
+        ? 'An internal transfer can’t be split across projects — remove the extra rows, or pick a project instead.'
+        : 'The split needs positive amounts that add up to ' + fmt(net) + '.';
       el.classList.remove('hidden');
       return;
     }
@@ -1887,12 +1997,7 @@
     if (review.idx >= review.queue.length) {
       document.getElementById('review-step-cards').classList.add('hidden');
       document.getElementById('review-step-done').classList.remove('hidden');
-      var bits = ['Recorded ' + review.saved + ' transaction(s).'];
-      if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
-      if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
-      if (review.skippedTransfers) bits.push(review.skippedTransfers + ' pot/savings transfer(s) were left out at your request.');
-      if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
-      document.getElementById('review-summary').textContent = bits.join(' ');
+      document.getElementById('review-summary').textContent = reviewSummaryText();
       renderAll();
     } else {
       renderReviewCard();
@@ -1900,7 +2005,7 @@
   }
 
   function resetReview() {
-    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, skippedTransfers: 0, typeIdx: -1, transferCount: 0, delimiter: ',', skippedAbove: 0, skippedBelow: 0 };
+    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, typeIdx: -1, transferCount: 0, autoInternal: [], internalRecorded: 0, delimiter: ',', skippedAbove: 0, skippedBelow: 0 };
     document.getElementById('csv-file').value = '';
     document.getElementById('review-step-map').classList.add('hidden');
     document.getElementById('review-step-cards').classList.add('hidden');
@@ -1965,7 +2070,13 @@
     app.projects.forEach(function (p) { knownIds[p.id] = true; });
     var orphans = {};
     var nonProject = { total: 0, count: 0 };
+    var internal = { out: 0, in: 0, count: 0 };
     app.transactions.forEach(function (t) {
+      if (isInternalTxn(t)) {        // pot moves: recorded, never counted
+        if (t.amount >= 0) internal.out += t.amount; else internal.in += -t.amount;
+        internal.count++;
+        return;
+      }
       if (isIncomeTxn(t)) return;   // income is reported separately
       if (!t.projectId) { nonProject.total += t.amount; nonProject.count++; return; }
       if (!knownIds[t.projectId]) {
@@ -2008,10 +2119,19 @@
     });
     host.innerHTML = html;
 
-    document.getElementById('report-nonproject').innerHTML = nonProject.count
-      ? '<div class="card small muted">' + nonProject.count + ' transaction(s) totalling ' +
-        fmt(nonProject.total) + ' were ignored (personal / transfers).</div>'
-      : '';
+    var footNotes = '';
+    if (nonProject.count) {
+      footNotes += '<div>' + nonProject.count + ' transaction(s) totalling ' +
+        fmt(nonProject.total) + ' were ignored (personal / transfers).</div>';
+    }
+    if (internal.count) {
+      footNotes += '<div style="margin-top:4px;">' + internal.count +
+        ' pot / savings transfer(s) recorded as internal transfers — ' +
+        fmt(internal.out) + ' into pots, ' + fmt(internal.in) + ' back out. ' +
+        'These don’t count towards any budget; the costs they fund are the payments that leave the account.</div>';
+    }
+    document.getElementById('report-nonproject').innerHTML =
+      footNotes ? '<div class="card small muted">' + footNotes + '</div>' : '';
   }
 
   function overheadsReportCard(oh, spentAmt) {
@@ -2071,8 +2191,9 @@
     app.transactions.forEach(function (t) {
       var label = t.statement || '(no statement label)';
       var s = stmts[label];
-      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, income: 0, vat: 0, total: 0, latestDate: '' };
+      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, income: 0, vat: 0, internal: 0, total: 0, latestDate: '' };
       if (t.date > s.latestDate) s.latestDate = t.date;
+      if (isInternalTxn(t)) { s.internal += Math.abs(t.amount); return; }
       if (t.vat > 0) s.vat += t.vat;
       if (isIncomeTxn(t)) {
         if (t.projectId) s.income += -t.amount;
@@ -2105,6 +2226,10 @@
       if (s.ignored) {
         html += '<tr><td style="padding-left:24px;" class="muted">Ignored (personal / transfers)</td>' +
           '<td class="num muted">' + fmt(s.ignored) + '</td></tr>';
+      }
+      if (s.internal) {
+        html += '<tr><td style="padding-left:24px;" class="muted">Internal transfers (pots / savings, not counted)</td>' +
+          '<td class="num muted">' + fmt(s.internal) + '</td></tr>';
       }
       return html;
     }).join('');

@@ -120,10 +120,8 @@ version label and total update.
    - If a header name misleads (a "Date" column holding something else), the
      guess is **checked against the rows themselves** and re-picked from
      whichever column actually holds dates or money.
-   - **Pot / savings transfers are reviewed like anything else.** Project
-     budgets often sit in interest-bearing pots, so a pot move is a real
-     budget event. A checkbox counts them and can leave them out, but it is
-     **off by default**.
+   - **Pot / savings transfers are recorded as internal transfers.** See
+     below — they're kept, labelled, and counted against nothing.
    - A **notes/reference column** (e.g. Monzo's "Notes and #tags") is
      picked up automatically: the note is shown on each card and prefills
      the "what was this for?" field — handy when it holds invoice numbers.
@@ -131,6 +129,20 @@ version label and total update.
      card; allocate them to the project they refund.
 4. Step through each transaction: pick the project, pick the **budget line**
    (grouped by your budget's sections), optionally add a note, **Save & next**.
+
+   **Pot and savings transfers → internal transfers.** Money moved between
+   the account and its own pots is *not* a cost, even when the pot holds a
+   project's budget: the real cost is the payment that leaves the account
+   afterwards. Counting both would double every figure — a typical month
+   moving £577k between pots to pay £29k of invoices would report £600k of
+   spend. So pot moves are **recorded and labelled `Internal transfer`, and
+   excluded from every budget, spend and income total**. They stay visible in
+   the sheet and get their own line in the report (`£x into pots, £y back
+   out`) so the statement still reconciles. The mapping step counts them and
+   files them in one go — no clicking through a hundred pot moves — and the
+   tick-box turns that off if you'd rather judge each one. `Internal
+   transfer` is also an option on every card, including money-in cards, for
+   pot moves the statement's Type column doesn't flag.
 
    **VAT:** budgets are ex-VAT, so every card has an *Amount includes VAT*
    tick-box (default rate 20%, editable per transaction). Tick it and the
