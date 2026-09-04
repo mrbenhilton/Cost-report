@@ -365,6 +365,7 @@
         </div>
         <div class="txn-desc" id="rv-desc"></div>
         <div class="small muted hidden" id="rv-note" style="margin:-8px 0 14px;"></div>
+        <div class="notice small hidden" id="rv-recorded" style="margin:-4px 0 12px;"></div>
         <div class="row" style="align-items:center; margin:-4px 0 12px;">
           <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
             <input type="checkbox" id="rv-vat" style="width:auto;" onchange="onVatToggle()">
@@ -411,6 +412,7 @@
         </div>
         <hr class="divider">
         <div class="row">
+          <button class="btn" id="rv-back" onclick="goBackReview()">← Back</button>
           <button class="btn primary" id="rv-save" onclick="saveCurrentTxn()">Save &amp; next</button>
           <button class="btn" id="rv-skip" onclick="skipCurrentTxn()">Skip for now</button>
           <span class="small muted" style="align-self:center;">Skipped items will be asked again next time you upload this statement.</span>
@@ -445,6 +447,7 @@
     rows: [], filename: '', queue: [], idx: 0,
     saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0,
     typeIdx: -1, transferCount: 0, skippedTransfers: 0,
+    savedHashes: {}, skippedHashes: {},
     delimiter: ',', skippedAbove: 0, skippedBelow: 0
   };
   var budgetEditor = { lines: [], replaceProjectId: null };
@@ -1555,12 +1558,14 @@
   }
 
   function reviewSummaryText() {
-    var bits = ['Recorded ' + review.saved + ' transaction(s).'];
+    var saved = Object.keys(review.savedHashes).length;
+    var skipped = Object.keys(review.skippedHashes).length;
+    var bits = ['Recorded ' + saved + ' transaction(s).'];
     if (review.skippedTransfers) {
       bits.push(review.skippedTransfers + ' pot/savings transfer(s) were left out — ' +
         'internal cashflow between your own sub-accounts.');
     }
-    if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
+    if (skipped) bits.push(skipped + ' skipped — they’ll come up again if you re-upload this statement.');
     if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
     if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
     return bits.join(' ');
@@ -1578,7 +1583,8 @@
     var occ = {};
     review.queue = [];
     review.idx = 0;
-    review.saved = 0; review.skipped = 0; review.duplicates = 0;
+    review.duplicates = 0;
+    review.savedHashes = {}; review.skippedHashes = {};
     review.skippedIncome = scan.income;
     review.skippedTransfers = scan.transfers;
 
@@ -1618,6 +1624,28 @@
     renderReviewCard();
   }
 
+  /** Which entry in the project dropdown a stored row corresponds to. */
+  function storedProjectValue(txn) {
+    if (isInternalTxn(txn)) return INTERNAL_TRANSFER;
+    return txn.projectId || NO_PROJECT;
+  }
+
+  function updateReviewNavState() {
+    var backBtn = document.getElementById('rv-back');
+    if (backBtn) backBtn.disabled = review.idx === 0;
+    var t = review.queue[review.idx];
+    var saveBtn = document.getElementById('rv-save');
+    var recorded = t ? storedPartsFor(t.hash).length > 0 : false;
+    if (saveBtn) saveBtn.textContent = recorded ? 'Update & next' : 'Save & next';
+    var hint = document.getElementById('rv-recorded');
+    if (hint) {
+      hint.textContent = recorded
+        ? 'Already recorded — change anything below and save again to correct it.'
+        : '';
+      hint.classList.toggle('hidden', !recorded);
+    }
+  }
+
   function renderReviewCard() {
     var t = review.queue[review.idx];
     var total = review.queue.length;
@@ -1639,19 +1667,40 @@
 
     document.getElementById('rv-category').value = '';
     document.getElementById('rv-error').classList.add('hidden');
-    document.getElementById('rv-vat').checked = false;
-    document.getElementById('rv-vat-rate').value = String(defaultVatRate());
-    document.getElementById('rv-vat-rate-wrap').classList.add('hidden');
+
+    var stored = storedPartsFor(t.hash);
+    var first = stored[0];
+    // a card already reviewed reopens with what was entered, VAT rate included
+    var vatOn = !!(first && Math.abs(Math.abs(first.gross) - Math.abs(first.amount)) > 0.005);
+    var vatRate = defaultVatRate();
+    if (vatOn) {
+      vatRate = Math.round((Math.abs(first.gross) / Math.abs(first.amount) - 1) * 1000) / 10;
+    }
+    document.getElementById('rv-vat').checked = vatOn;
+    document.getElementById('rv-vat-rate').value = String(vatRate);
+    document.getElementById('rv-vat-rate-wrap').classList.toggle('hidden', !vatOn);
     document.getElementById('rv-vat-preview').textContent = '';
 
     document.getElementById('category-list').innerHTML =
       allCategories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
 
     var sel = document.getElementById('rv-project');
-    var prev = sel.value;
+    var prev = first ? storedProjectValue(first) : sel.value;
     rebuildProjectSelect(sel);
     if (prev && [].some.call(sel.options, function (o) { return o.value === prev; })) sel.value = prev;
     onReviewProjectChange();
+    if (first && !isIncomeTxn(first) && !isInternalTxn(first)) {
+      var lineSel = document.getElementById('rv-line');
+      if (!document.getElementById('rv-line-wrap').classList.contains('hidden')) {
+        lineSel.value = first.lineId || OVERAGE;
+        if (lineSel.selectedIndex === -1) lineSel.value = OVERAGE;
+        onReviewLineChange();
+      }
+      if (!document.getElementById('rv-category-wrap').classList.contains('hidden')) {
+        document.getElementById('rv-category').value = first.category || '';
+      }
+    }
+    if (first && first.purpose) document.getElementById('rv-purpose').value = first.purpose;
 
     // money-in → income allocation UI instead of project + budget line
     // (after onReviewProjectChange so its category toggle can't re-show fields)
@@ -1660,10 +1709,25 @@
     document.getElementById('rv-income').classList.toggle('hidden', !isIncome);
     document.getElementById('rv-newproject').classList.toggle('hidden',
       isIncome || sel.value !== NEW_PROJECT);
+    updateReviewNavState();
     if (isIncome) {
       document.getElementById('rv-category-wrap').classList.add('hidden');
       document.getElementById('rv-income-rows').innerHTML = '';
-      addIncomeSplitRow(-t.amount);
+      if (stored.length && isIncomeTxn(first)) {
+        stored.forEach(function (part) {
+          addIncomeSplitRow(-part.amount);
+          var rows = document.querySelectorAll('#rv-income-rows .income-part');
+          var selEl = rows[rows.length - 1].querySelector('.is-proj');
+          selEl.value = part.projectId || NO_PROJECT;
+          if (selEl.selectedIndex === -1) selEl.value = NO_PROJECT;
+        });
+      } else if (stored.length && isInternalTxn(first)) {
+        addIncomeSplitRow(-t.amount);
+        var only = document.querySelector('#rv-income-rows .is-proj');
+        only.value = INTERNAL_TRANSFER;
+      } else {
+        addIncomeSplitRow(currentCardNetTotal());
+      }
       updateIncomeRemaining();
     }
     document.getElementById('rv-purpose').focus();
@@ -1895,25 +1959,61 @@
       purpose: document.getElementById('rv-purpose').value.trim(),
       statement: document.getElementById('statement-label').value.trim()
     };
+    commitCard(t.hash, [txn]);
+  }
+
+  function skipCurrentTxn() {
+    var t = review.queue[review.idx];
+    // a card revisited and skipped keeps whatever was already recorded for it
+    if (!storedPartsFor(t.hash).length) review.skippedHashes[t.hash] = true;
+    advanceReview();
+  }
+
+  function goBackReview() {
+    if (review.idx === 0) return;
+    review.idx--;
+    renderReviewCard();
+  }
+
+  /** Rows already stored for a card — the base row plus any income-split parts. */
+  function storedPartsFor(hash) {
+    return app.transactions.filter(function (t) {
+      return t.hash === hash || t.hash.indexOf(hash + '~') === 0;
+    });
+  }
+
+  /**
+   * Writes a card's rows. Revisiting a card replaces what it stored last time
+   * rather than adding a second copy beside it.
+   */
+  function commitCard(baseHash, txns) {
+    var editing = storedPartsFor(baseHash).length > 0;
     var saveBtn = document.getElementById('rv-save');
     var skipBtn = document.getElementById('rv-skip');
-    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
-    run('saveTransactions', [txn]).then(function () {
-      app.transactions.push(txn);
-      review.saved++;
+    var backBtn = document.getElementById('rv-back');
+    var label = saveBtn.textContent;
+    saveBtn.disabled = true; skipBtn.disabled = true; backBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    var call = editing
+      ? run('replaceTransactions', baseHash, txns)
+      : run('saveTransactions', txns);
+    call.then(function () {
+      app.transactions = app.transactions.filter(function (t) {
+        return !(t.hash === baseHash || t.hash.indexOf(baseHash + '~') === 0);
+      });
+      txns.forEach(function (x) { app.transactions.push(x); });
+      review.savedHashes[baseHash] = true;
+      delete review.skippedHashes[baseHash];
       advanceReview();
     }).catch(function (e) {
       var el = document.getElementById('rv-error');
       el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
       el.classList.remove('hidden');
     }).finally(function () {
-      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
+      saveBtn.disabled = false; skipBtn.disabled = false;
+      saveBtn.textContent = label;
+      updateReviewNavState();
     });
-  }
-
-  function skipCurrentTxn() {
-    review.skipped++;
-    advanceReview();
   }
 
   /** Records a pot move: kept on the statement, counted against nothing. */
@@ -1922,20 +2022,7 @@
       date: t.date, description: t.description, amount: t.amount,
       note: document.getElementById('rv-purpose').value.trim() || t.note
     }, document.getElementById('statement-label').value.trim());
-    var saveBtn = document.getElementById('rv-save');
-    var skipBtn = document.getElementById('rv-skip');
-    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
-    run('saveTransactions', [txn]).then(function () {
-      app.transactions.push(txn);
-      review.saved++;
-      advanceReview();
-    }).catch(function (e) {
-      var el = document.getElementById('rv-error');
-      el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
-      el.classList.remove('hidden');
-    }).finally(function () {
-      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
-    });
+    commitCard(t.hash, [txn]);
   }
 
   function saveIncomeSplit(t) {
@@ -1969,20 +2056,7 @@
         purpose: purpose, statement: statement
       };
     });
-    var saveBtn = document.getElementById('rv-save');
-    var skipBtn = document.getElementById('rv-skip');
-    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
-    run('saveTransactions', txns).then(function () {
-      txns.forEach(function (x) { app.transactions.push(x); });
-      review.saved++;
-      advanceReview();
-    }).catch(function (e) {
-      var el = document.getElementById('rv-error');
-      el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
-      el.classList.remove('hidden');
-    }).finally(function () {
-      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
-    });
+    commitCard(t.hash, txns);
   }
 
   function advanceReview() {
@@ -1998,7 +2072,7 @@
   }
 
   function resetReview() {
-    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, typeIdx: -1, transferCount: 0, skippedTransfers: 0, delimiter: ',', skippedAbove: 0, skippedBelow: 0 };
+    review = { rows: [], filename: '', queue: [], idx: 0, duplicates: 0, skippedIncome: 0, typeIdx: -1, transferCount: 0, skippedTransfers: 0, savedHashes: {}, skippedHashes: {}, delimiter: ',', skippedAbove: 0, skippedBelow: 0 };
     document.getElementById('csv-file').value = '';
     document.getElementById('review-step-map').classList.add('hidden');
     document.getElementById('review-step-cards').classList.add('hidden');

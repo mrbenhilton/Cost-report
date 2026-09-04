@@ -340,28 +340,73 @@ function saveTransactions(txns) {
     d.rows.forEach(function (r) {
       if (r.values[d.col['Hash']]) existing[String(r.values[d.col['Hash']])] = true;
     });
-    var rows = [];
+    var kept = [];
     var duplicates = 0;
-    var now = new Date();
     txns.forEach(function (t) {
       if (existing[String(t.hash)]) { duplicates++; return; }
       existing[String(t.hash)] = true;
-      rows.push(rowArray_(d.col, TXN_HEADERS, {
-        'Hash': String(t.hash), 'Date': String(t.date || ''),
-        'Description': String(t.description || ''), 'Amount': Number(t.amount) || 0,
-        'Gross': Number(t.gross) || Number(t.amount) || 0, 'VAT': Number(t.vat) || 0,
-        'Project ID': String(t.projectId || ''), 'Project Name': String(t.projectName || ''),
-        'Line ID': String(t.lineId || ''), 'Line Name': String(t.lineName || ''),
-        'Category': String(t.category || ''), 'Purpose': String(t.purpose || ''),
-        'Statement': String(t.statement || ''), 'Recorded': now
-      }));
+      kept.push(t);
     });
-    if (rows.length) {
-      var width = Math.max.apply(null, rows.map(function (r) { return r.length; }));
-      rows = rows.map(function (r) { while (r.length < width) r.push(''); return r; });
-      d.sheet.getRange(d.sheet.getLastRow() + 1, 1, rows.length, width).setValues(rows);
+    appendTransactions_(d, kept);
+    return { saved: kept.length, duplicates: duplicates };
+  });
+}
+
+/** Writes transaction objects onto the end of the Transactions tab. */
+function appendTransactions_(d, txns) {
+  if (!txns.length) return;
+  var now = new Date();
+  var rows = txns.map(function (t) {
+    return rowArray_(d.col, TXN_HEADERS, {
+      'Hash': String(t.hash), 'Date': String(t.date || ''),
+      'Description': String(t.description || ''), 'Amount': Number(t.amount) || 0,
+      'Gross': Number(t.gross) || Number(t.amount) || 0, 'VAT': Number(t.vat) || 0,
+      'Project ID': String(t.projectId || ''), 'Project Name': String(t.projectName || ''),
+      'Line ID': String(t.lineId || ''), 'Line Name': String(t.lineName || ''),
+      'Category': String(t.category || ''), 'Purpose': String(t.purpose || ''),
+      'Statement': String(t.statement || ''), 'Recorded': now
+    });
+  });
+  var width = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+  rows = rows.map(function (r) { while (r.length < width) r.push(''); return r; });
+  d.sheet.getRange(d.sheet.getLastRow() + 1, 1, rows.length, width).setValues(rows);
+}
+
+/**
+ * Rewrites one reviewed transaction — what "go back and change it" needs.
+ * Everything previously stored for `baseHash` is removed first, including the
+ * `hash~1`, `hash~2` parts an income split creates, so re-saving a card
+ * replaces its rows instead of stacking a second copy beside them.
+ */
+function replaceTransactions(baseHash, txns) {
+  var base = String(baseHash || '').trim();
+
+  // Validate everything BEFORE deleting anything: a replacement that can't be
+  // written must leave the existing rows exactly where they are.
+  if (!base) throw new Error('Nothing to replace — no transaction was named.');
+  if (!txns || !txns.length) {
+    throw new Error('Refusing to replace a transaction with nothing. Use deleteTransaction to remove one.');
+  }
+  txns.forEach(function (t) {
+    var h = String(t.hash || '');
+    if (h !== base && h.indexOf(base + '~') !== 0) {
+      throw new Error('Replacement rows must belong to the transaction being edited.');
     }
-    return { saved: rows.length, duplicates: duplicates };
+    if (!t.date) throw new Error('A replacement row is missing its date.');
+  });
+
+  return withLock_(function () {
+    var d = readRows_(SHEET_TRANSACTIONS, TXN_HEADERS);
+    var doomed = [];
+    d.rows.forEach(function (r) {
+      var h = String(r.values[d.col['Hash']] || '');
+      // '~' only ever separates income-split parts; a generated hash is alphanumeric
+      if (h === base || h.indexOf(base + '~') === 0) doomed.push(r.rowNumber);
+    });
+    // append first, so a failure here leaves the original rows untouched
+    appendTransactions_(d, txns);
+    for (var i = doomed.length - 1; i >= 0; i--) d.sheet.deleteRow(doomed[i]);
+    return { removed: doomed.length, saved: txns.length, transactions: listTransactions_() };
   });
 }
 

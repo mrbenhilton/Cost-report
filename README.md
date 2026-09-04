@@ -168,6 +168,16 @@ version label and total update.
    - Unsure? **Skip for now** — it will be offered again next time you upload
      that statement.
 
+   **← Back** returns to the previous transaction and reopens it exactly as
+   you left it — project, budget line, category, note and VAT rate all
+   restored, an income split rebuilt row by row. The button then reads
+   *Update & next*, and saving **replaces** what that card stored rather than
+   adding a second copy: the reconciliation can't be double-counted by
+   correcting a mistake. Server-side, a replacement is validated before
+   anything is removed and the new rows are written before the old ones are
+   deleted, so an interrupted edit can leave a visible duplicate but never
+   a hole.
+
 **Re-uploading is safe.** Every transaction gets a fingerprint (date +
 description + amount), so uploading the same statement twice never creates
 duplicates — already-recorded transactions are silently skipped.
