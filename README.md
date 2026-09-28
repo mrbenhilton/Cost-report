@@ -21,7 +21,15 @@ quote:
    (Monzo + Amex) and ALLOTMENT FILMS LTD (Monzo) out of the box. A
    *Company* switcher in the header keeps each company's projects,
    statements and reports separate.
-5. Everything is stored **directly in a Google Sheet you own**, so nothing is
+5. **Receipts & bills by email** — everyone sends receipts, photos and
+   supplier invoices to `accounts@film.works`. Claude reads each one
+   (supplier, date, amount, VAT, VAT number, which company it's for), it's
+   filed in Google Drive, and matched to its card/bank transaction
+   automatically. Missing receipts are chased by email, unpaid bills are
+   listed with due dates, and at month end one click builds the
+   accountant's spreadsheet (every transaction with project, VAT and a
+   receipt link) and emails it to them.
+6. Everything is stored **directly in a Google Sheet you own**, so nothing is
    ever lost between sessions — the spreadsheet *is* the database, and you can
    always open it and see (or edit) your data.
 
@@ -33,7 +41,7 @@ private to your Google account, no servers or API keys to manage.
 1. **Create the spreadsheet.** Go to [sheets.new](https://sheets.new) and name
    the spreadsheet something like `Project Cost Tracker`. Leave it empty — the
    app creates its own tabs (`Companies`, `Accounts`, `Projects`,
-   `Budget Lines`, `Transactions`, `Settings`) on first run.
+   `Budget Lines`, `Transactions`, `Documents`, `Settings`) on first run.
 
 2. **Open the script editor.** In that spreadsheet, choose
    **Extensions → Apps Script**. A script project opens in a new tab.
@@ -41,6 +49,8 @@ private to your Google account, no servers or API keys to manage.
 3. **Add the code.**
    - In the editor, select the `Code.gs` file, delete its contents, and paste
      in everything from [`apps-script/Code.gs`](apps-script/Code.gs).
+   - Click **＋ (Add a file) → Script**, name it `Receipts`, and paste in
+     everything from [`apps-script/Receipts.gs`](apps-script/Receipts.gs).
    - Click **＋ (Add a file) → HTML**, name it exactly `Index`, delete the
      placeholder contents, and paste in everything from
      [`apps-script/Index.html`](apps-script/Index.html).
@@ -50,9 +60,12 @@ private to your Google account, no servers or API keys to manage.
    - Click **Deploy → New deployment**.
    - Click the gear next to "Select type" and choose **Web app**.
    - Set *Execute as*: **Me**, and *Who has access*: **Only myself**.
-   - Click **Deploy**, then **Authorize access** and approve the permissions
-     (it only asks for access to your spreadsheets — the data never leaves
-     your Google account).
+   - Click **Deploy**, then **Authorize access** and approve the permissions:
+     your spreadsheets, Gmail (to read the accounts inbox and send chase /
+     accountant emails), Drive (to file receipts), and external requests
+     (to send documents to the Claude API for reading). Google shows an
+     "unverified app" warning for your own scripts — click *Advanced → Go
+     to … (unsafe)*; it's your code running in your account.
    - Copy the **Web app URL** it gives you and **bookmark it** — that URL is
      your app.
 
@@ -217,6 +230,77 @@ Manual entries are stored like any other transaction (grouped under a
 "Manual entry" statement in the by-statement view) and count toward the
 line's Actual in the reconciliation.
 
+## Receipts & bills
+
+### One-time setup
+
+1. **Claude API key.** At [console.anthropic.com](https://console.anthropic.com)
+   sign in (or sign up), add a payment method under *Billing*, then
+   *API keys → Create key*. Copy it (it starts `sk-ant-`), open the app's
+   **Receipts & bills** tab and paste it into the key box. It's stored in
+   the script's private properties, not in the spreadsheet. Documents are
+   read with Claude Opus 5 at low effort.
+2. **Tick "check every hour"** so new mail is picked up without you doing
+   anything (or press *Check inbox now* whenever you like).
+3. **Tell people where to send things.** The shared address is
+   `accounts@film.works` (change it with a `sharedInbox` row in `Settings`).
+   It must deliver into the mailbox the app runs as.
+
+### Where documents come from
+
+| Send to | What happens |
+|---|---|
+| `accounts@film.works` | Anything — Claude decides receipt vs bill, and which company it's addressed to. Receipts with no company on them (most till slips) get their company from the payment they match. |
+| `ben+receipts@film.works`, `ben+invoices@film.works` | Forces Filmworks receipt / bill |
+| `ben+allotment-receipts@…`, `ben+allotment-invoices@…` | Forces Allotment receipt / bill |
+| *Upload a photo / PDF* on the tab | Same as emailing it |
+
+Plus-addresses (`name+anything@`) need no setup — they land in the normal
+inbox and the app reads the tag. Each email's PDFs and photos are read
+separately; an email with no attachment (an Uber or Amazon receipt) is read
+from its text and saved as a PDF. iPhone HEIC photos can't be read — set
+*Settings → Camera → Formats → Most Compatible* on the phone, or send as JPG.
+Emails from Glen / Domante / you are credited to that person (the list and
+email addresses are the `people` setting:
+`Ben <ben@film.works>, Glen <glen@film.works>, Domante <domante@film.works>`).
+
+Files are stored in Drive under **Accounts — receipts & invoices /
+&lt;company&gt; / &lt;month&gt;** (or *Unsorted* until the company is
+known), renamed like `2026-09-05_Uber_£23.40.pdf`.
+
+### Matching
+
+Whenever you open the tab (or finish a statement), each receipt is matched
+to the transaction with the **same amount** within a few days of its date
+(bills: paid up to four months after the invoice). If there's exactly one
+candidate, it's linked automatically; otherwise it's listed under
+*Receipts to match* with the likely transactions first. When a receipt
+shows VAT and the transaction was recorded without any, **the VAT is taken
+from the receipt** — so budgets get the true ex-VAT cost.
+
+- **Bills to pay** lists unpaid supplier invoices with due dates and
+  overdue flags; each closes itself when its payment is matched.
+- **Missing receipts** lists every card/bank payment without one, grouped
+  by spender. *Email Glen* sends him the list (replies go to the accounts
+  address, so his photos are filed automatically). Mark bank fees,
+  salaries, HMRC etc. *not needed*.
+- A **📎 receipt** link appears next to matched transactions in the cost report.
+
+### Month end → accountant
+
+Pick the month (or VAT quarter) and **Build accountant spreadsheet**. It
+creates a Google Sheet in the company's Drive folder with:
+
+- **Transactions** — date, account, spender, type, description, supplier,
+  project, budget line, net, VAT, gross, supplier VAT number, a link to
+  the receipt, and receipt status (✓ / MISSING / not needed)
+- **Supplier bills** — paid (with date and account) or UNPAID
+- **VAT summary** — output VAT on income, input VAT backed by a VAT
+  receipt, input VAT with no valid receipt yet, and the net payable
+
+**Email to accountant** shares the sheet and that company's receipts folder
+with them (view only) and emails the link. Do it once per company.
+
 ## Where the data lives
 
 Everything is in your Google Sheet:
@@ -228,7 +312,8 @@ Everything is in your Google Sheet:
 | `Companies` | one row per company: ID, name, short name, VAT number |
 | `Accounts` | one row per bank/card account: ID, company, name, kind (`bank`/`amex`) |
 | `Transactions` | one row per recorded transaction: date, description, amount (ex-VAT), gross, VAT, project, budget line, note, statement label, account, company, spender |
-| `Settings` | app settings (currency symbol, `vatRate`, `people`) |
+| `Documents` | one row per receipt / bill: kind, company, supplier, date, due date, amounts, VAT, VAT number, Drive link, matched transaction, status |
+| `Settings` | app settings (currency symbol, `vatRate`, `people`, `sharedInbox`, `accountantEmail`) |
 
 You can open the sheet any time (there's an *Open spreadsheet* link in the
 app header), build your own pivot tables, or fix a typo directly in a cell.
@@ -246,6 +331,8 @@ untouched. New columns/tabs are added to your spreadsheet automatically.
 ```
 apps-script/
   Code.gs          server-side code (reads/writes the Google Sheet)
+  Receipts.gs      email intake, Claude document reading, matching,
+                   chase emails and the accountant pack
   Index.html       the web app UI (budget + statement parsing incl. Amex PDFs,
                    reconciliation, reports)
   appsscript.json  Apps Script manifest (only needed if you deploy with clasp)
