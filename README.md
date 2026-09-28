@@ -17,7 +17,11 @@ quote:
    spent-vs-budget meter. A **Company Overheads** project is maintained
    automatically: every budget's production fee flows into it as income,
    and company (non-project) expenses are recorded against it.
-4. Everything is stored **directly in a Google Sheet you own**, so nothing is
+4. **Several companies and accounts in one place** — FILMWORKS LONDON LTD
+   (Monzo + Amex) and ALLOTMENT FILMS LTD (Monzo) out of the box. A
+   *Company* switcher in the header keeps each company's projects,
+   statements and reports separate.
+5. Everything is stored **directly in a Google Sheet you own**, so nothing is
    ever lost between sessions — the spreadsheet *is* the database, and you can
    always open it and see (or edit) your data.
 
@@ -28,8 +32,8 @@ private to your Google account, no servers or API keys to manage.
 
 1. **Create the spreadsheet.** Go to [sheets.new](https://sheets.new) and name
    the spreadsheet something like `Project Cost Tracker`. Leave it empty — the
-   app creates its own tabs (`Projects`, `Budget Lines`, `Transactions`,
-   `Settings`) on first run.
+   app creates its own tabs (`Companies`, `Accounts`, `Projects`,
+   `Budget Lines`, `Transactions`, `Settings`) on first run.
 
 2. **Open the script editor.** In that spreadsheet, choose
    **Extensions → Apps Script**. A script project opens in a new tab.
@@ -95,13 +99,55 @@ Lines that keep the same section + item name keep their identity, so
 transactions you've already reconciled stay attached to them; the amounts,
 version label and total update.
 
-## Monthly routine: reconcile the statement
+## Companies and accounts
 
-1. In your online banking, export the month's statement as **CSV**.
-2. Open the app → **Reconcile statement** → choose the file and give it a
-   label like `July 2026`.
+The first run seeds two companies and three accounts:
+
+| Account | Company | Kind |
+|---|---|---|
+| Filmworks Monzo | FILMWORKS LONDON LTD | bank |
+| Filmworks Amex | FILMWORKS LONDON LTD | amex |
+| Allotment Monzo | ALLOTMENT FILMS LTD | bank |
+
+Rename them, add VAT numbers, or add accounts directly in the `Companies`
+and `Accounts` tabs (an account's *Kind* is `bank` or `amex`). Every
+project belongs to the company that was selected in the header when it
+was created, and each company has its own **Company Overheads**. Data
+recorded before companies existed belongs to Filmworks / Filmworks Monzo.
+
+**Inter-company money** — a transfer between the two companies' accounts,
+or one company paying the other's bill — has its own option on every
+review card (*Inter-company — Allotment (loan / transfer)*). It's kept out
+of project costs and income, and the report shows the net amount owed
+between the companies. Transactions that mention the other company's name
+are pre-selected as inter-company.
+
+**Spenders.** Every expense can be tagged with who spent it (*Who spent
+it?* on the review card) so missing receipts can be chased with the right
+person later. The list is Ben, Glen, Domante — change it with a `people`
+row in the `Settings` tab (e.g. `people | Ben, Glen, Domante`). On Amex
+statements the cardmember is filled in automatically; on Monzo the app
+suggests whoever you tagged last time for the same merchant.
+
+## Monthly routine: reconcile the statements
+
+1. Export each account's statement: **CSV** from Monzo (both companies);
+   for Amex, either the **PDF statement** as downloaded, or a CSV export
+   from the Amex website — pick one format per account and stick to it,
+   because the same transaction reads differently in each and wouldn't be
+   recognised as a duplicate.
+2. Open the app → **Reconcile statement** → pick the **account**, choose the
+   file; the label is filled in (e.g. `Filmworks Amex — Aug–Sep 2026`).
 3. Check the column mapping (the app guesses date / description / amount and
    handles UK & US date formats, separate money-in/money-out columns, etc.).
+   **Amex PDFs** are read directly: each cardmember section (Ben's card,
+   Glen's card…) becomes the transaction's spender, credits marked `CR`
+   come in as money in, foreign-spend amounts and detail lines become the
+   statement note, and the monthly *PAYMENT RECEIVED* is skipped as an
+   internal transfer. Amex amounts are positive for charges, which the
+   column step sets automatically for an Amex account.
+   **The Amex repayment on the Monzo side** (a payment to American
+   Express) is skipped the same way, so the money is never counted twice.
    Bank-specific niceties, verified against a real Monzo Business export:
    - **Internal pot/savings transfers are skipped in bulk** — a checkbox
      shows how many rows are pot-to-pot moves (via the statement's Type
@@ -179,8 +225,10 @@ Everything is in your Google Sheet:
 |---|---|
 | `Projects` | one row per project: name, client, budget total, fee, version |
 | `Budget Lines` | one row per budget line: section, item, description, amount |
-| `Transactions` | one row per recorded transaction: date, description, amount, project, budget line, note, statement label |
-| `Settings` | app settings (currency symbol) |
+| `Companies` | one row per company: ID, name, short name, VAT number |
+| `Accounts` | one row per bank/card account: ID, company, name, kind (`bank`/`amex`) |
+| `Transactions` | one row per recorded transaction: date, description, amount (ex-VAT), gross, VAT, project, budget line, note, statement label, account, company, spender |
+| `Settings` | app settings (currency symbol, `vatRate`, `people`) |
 
 You can open the sheet any time (there's an *Open spreadsheet* link in the
 app header), build your own pivot tables, or fix a typo directly in a cell.
@@ -198,7 +246,8 @@ untouched. New columns/tabs are added to your spreadsheet automatically.
 ```
 apps-script/
   Code.gs          server-side code (reads/writes the Google Sheet)
-  Index.html       the web app UI (budget parsing, reconciliation, reports)
+  Index.html       the web app UI (budget + statement parsing incl. Amex PDFs,
+                   reconciliation, reports)
   appsscript.json  Apps Script manifest (only needed if you deploy with clasp)
 README.md
 ```
