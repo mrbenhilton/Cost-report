@@ -1,9 +1,10 @@
 /**
  * Project Cost Tracker — server-side code (Google Apps Script).
  *
- * This script is bound to a Google Sheet. All data lives in four tabs of
- * that sheet (Projects, Budget Lines, Transactions, Settings), so nothing
- * is ever lost between sessions — the spreadsheet IS the database.
+ * This script is bound to a Google Sheet. All data lives in tabs of that
+ * sheet (Companies, Accounts, Projects, Budget Lines, Transactions,
+ * Settings), so nothing is ever lost between sessions — the spreadsheet IS
+ * the database.
  *
  * Columns are looked up by header name, so extra columns can be added to
  * a tab without breaking the app, and upgrades add any missing columns
@@ -14,21 +15,57 @@ var SHEET_PROJECTS = 'Projects';
 var SHEET_LINES = 'Budget Lines';
 var SHEET_TRANSACTIONS = 'Transactions';
 var SHEET_SETTINGS = 'Settings';
+var SHEET_COMPANIES = 'Companies';
+var SHEET_ACCOUNTS = 'Accounts';
 
-var PROJECT_HEADERS = ['ID', 'Name', 'Client', 'Budget', 'Fee', 'Version', 'Notes', 'Created'];
+var COMPANY_HEADERS = ['ID', 'Name', 'Short Name', 'VAT Number'];
+// Kind drives statement handling: 'bank' (Monzo etc.) or 'amex' (charges
+// are positive, the monthly repayment arrives as a credit).
+var ACCOUNT_HEADERS = ['ID', 'Company ID', 'Name', 'Kind'];
 
 /**
- * The Company Overheads project has a fixed ID so the app can recognise it.
- * Production fees from every project budget are treated as its income, and
- * company (non-project) expenses are recorded against it.
+ * Seeded on first run; edit names / VAT numbers / add accounts directly in
+ * the Companies and Accounts tabs. Rows recorded before companies existed
+ * have no company or account and belong to the first company's first bank
+ * account (DEFAULT_COMPANY_ID / DEFAULT_ACCOUNT_ID).
+ */
+var DEFAULT_COMPANIES = [
+  { 'ID': 'filmworks', 'Name': 'FILMWORKS LONDON LTD', 'Short Name': 'Filmworks', 'VAT Number': '' },
+  { 'ID': 'allotment', 'Name': 'ALLOTMENT FILMS LTD', 'Short Name': 'Allotment', 'VAT Number': '' }
+];
+var DEFAULT_ACCOUNTS = [
+  { 'ID': 'fw-monzo', 'Company ID': 'filmworks', 'Name': 'Filmworks Monzo', 'Kind': 'bank' },
+  { 'ID': 'fw-amex', 'Company ID': 'filmworks', 'Name': 'Filmworks Amex', 'Kind': 'amex' },
+  { 'ID': 'al-monzo', 'Company ID': 'allotment', 'Name': 'Allotment Monzo', 'Kind': 'bank' }
+];
+var DEFAULT_COMPANY_ID = 'filmworks';
+var DEFAULT_ACCOUNT_ID = 'fw-monzo';
+
+var PROJECT_HEADERS = ['ID', 'Name', 'Client', 'Budget', 'Fee', 'Version', 'Notes', 'Created', 'Company ID'];
+
+/**
+ * Each company has a Company Overheads project with a fixed ID so the app
+ * can recognise it: 'company-overheads' for the default company (kept for
+ * existing data), 'company-overheads-<company id>' for the others.
+ * Production fees from the company's project budgets are treated as its
+ * income, and company (non-project) expenses are recorded against it.
  */
 var OVERHEADS_ID = 'company-overheads';
+
+function overheadsIdFor_(companyId) {
+  return companyId === DEFAULT_COMPANY_ID ? OVERHEADS_ID : OVERHEADS_ID + '-' + companyId;
+}
+
+function isOverheadsId_(id) {
+  return String(id).indexOf(OVERHEADS_ID) === 0;
+}
 var LINE_HEADERS = ['ID', 'Project ID', 'Section', 'Item', 'Description', 'Qty', 'Rate', 'Amount', 'Order'];
 // Amount is always the ex-VAT (net) figure — the one reconciled against
 // budgets. Gross is what actually left the bank; VAT is the difference.
 var TXN_HEADERS = [
   'Hash', 'Date', 'Description', 'Amount', 'Gross', 'VAT', 'Project ID',
-  'Project Name', 'Line ID', 'Line Name', 'Category', 'Purpose', 'Statement', 'Recorded'
+  'Project Name', 'Line ID', 'Line Name', 'Category', 'Purpose', 'Statement', 'Recorded',
+  'Account ID', 'Company ID', 'Spender'
 ];
 var SETTINGS_HEADERS = ['Key', 'Value'];
 
@@ -102,8 +139,11 @@ function withLock_(fn) {
 
 /** Everything the UI needs, in one call. */
 function getAppData() {
-  ensureOverheadsProject_();
+  ensureCompaniesAndAccounts_();
+  ensureOverheadsProjects_();
   return {
+    companies: listCompanies_(),
+    accounts: listAccounts_(),
     projects: listProjects_(),
     budgetLines: listLines_(),
     transactions: listTransactions_(),
@@ -111,19 +151,63 @@ function getAppData() {
   };
 }
 
+// ------------------------------------------------------ Companies & accounts
+
+/** Seeds the Companies and Accounts tabs the first time (each only if empty). */
+function ensureCompaniesAndAccounts_() {
+  [[SHEET_COMPANIES, COMPANY_HEADERS, DEFAULT_COMPANIES],
+   [SHEET_ACCOUNTS, ACCOUNT_HEADERS, DEFAULT_ACCOUNTS]].forEach(function (spec) {
+    var d = readRows_(spec[0], spec[1]);
+    var hasAny = d.rows.some(function (r) { return r.values[d.col['ID']]; });
+    if (hasAny) return;
+    spec[2].forEach(function (obj) { d.sheet.appendRow(rowArray_(d.col, spec[1], obj)); });
+  });
+}
+
+function listCompanies_() {
+  var d = readRows_(SHEET_COMPANIES, COMPANY_HEADERS);
+  return d.rows.filter(function (r) { return r.values[d.col['ID']]; }).map(function (r) {
+    var v = r.values;
+    var name = String(v[d.col['Name']] || '');
+    return {
+      id: String(v[d.col['ID']]),
+      name: name,
+      shortName: String(v[d.col['Short Name']] || '') || name,
+      vatNumber: String(v[d.col['VAT Number']] || '')
+    };
+  });
+}
+
+function listAccounts_() {
+  var d = readRows_(SHEET_ACCOUNTS, ACCOUNT_HEADERS);
+  return d.rows.filter(function (r) { return r.values[d.col['ID']]; }).map(function (r) {
+    var v = r.values;
+    return {
+      id: String(v[d.col['ID']]),
+      companyId: String(v[d.col['Company ID']] || '') || DEFAULT_COMPANY_ID,
+      name: String(v[d.col['Name']] || ''),
+      kind: String(v[d.col['Kind']] || 'bank').toLowerCase()
+    };
+  });
+}
+
 // ---------------------------------------------------------------- Projects
 
-function ensureOverheadsProject_() {
+/** Every company gets its own Company Overheads project. */
+function ensureOverheadsProjects_() {
   var d = readRows_(SHEET_PROJECTS, PROJECT_HEADERS);
-  for (var i = 0; i < d.rows.length; i++) {
-    if (String(d.rows[i].values[d.col['ID']]) === OVERHEADS_ID) return;
-  }
-  d.sheet.appendRow(rowArray_(d.col, PROJECT_HEADERS, {
-    'ID': OVERHEADS_ID, 'Name': 'Company Overheads', 'Client': '',
-    'Budget': 0, 'Fee': 0, 'Version': '',
-    'Notes': 'Funded by production fees; holds company (non-project) expenses.',
-    'Created': new Date()
-  }));
+  var have = {};
+  d.rows.forEach(function (r) { have[String(r.values[d.col['ID']])] = true; });
+  listCompanies_().forEach(function (c) {
+    var id = overheadsIdFor_(c.id);
+    if (have[id]) return;
+    d.sheet.appendRow(rowArray_(d.col, PROJECT_HEADERS, {
+      'ID': id, 'Name': 'Company Overheads', 'Client': '',
+      'Budget': 0, 'Fee': 0, 'Version': '',
+      'Notes': 'Funded by production fees; holds company (non-project) expenses.',
+      'Created': new Date(), 'Company ID': c.id
+    }));
+  });
 }
 
 function listProjects_() {
@@ -138,7 +222,8 @@ function listProjects_() {
       fee: Number(v[d.col['Fee']]) || 0,
       version: String(v[d.col['Version']] || ''),
       notes: String(v[d.col['Notes']] || ''),
-      created: formatDate_(v[d.col['Created']])
+      created: formatDate_(v[d.col['Created']]),
+      companyId: String(v[d.col['Company ID']] || '') || DEFAULT_COMPANY_ID
     };
   });
 }
@@ -163,7 +248,7 @@ function listLines_() {
 
 /**
  * Creates a project together with its budget lines (from an uploaded
- * budget). meta: {name, client, budget, fee, version, notes};
+ * budget). meta: {name, client, budget, fee, version, notes, companyId};
  * lines: [{section, item, description, qty, rate, amount}]
  */
 function saveProjectWithBudget(meta, lines) {
@@ -176,7 +261,7 @@ function saveProjectWithBudget(meta, lines) {
       'ID': id, 'Name': name, 'Client': String(meta.client || ''),
       'Budget': Number(meta.budget) || 0, 'Fee': Number(meta.fee) || 0,
       'Version': String(meta.version || ''), 'Notes': String(meta.notes || ''),
-      'Created': new Date()
+      'Created': new Date(), 'Company ID': String(meta.companyId || '') || DEFAULT_COMPANY_ID
     }));
     writeLines_(id, lines || [], {});
     return { projects: listProjects_(), budgetLines: listLines_() };
@@ -249,8 +334,8 @@ function deleteLinesForProject_(projectId) {
 }
 
 /** Manual project creation (no uploaded budget). */
-function addProject(name, budget, notes) {
-  return saveProjectWithBudget({ name: name, budget: budget, notes: notes }, []).projects;
+function addProject(name, budget, notes, companyId) {
+  return saveProjectWithBudget({ name: name, budget: budget, notes: notes, companyId: companyId }, []).projects;
 }
 
 function updateProject(id, name, budget, notes) {
@@ -271,7 +356,7 @@ function updateProject(id, name, budget, notes) {
 }
 
 function deleteProject(id) {
-  if (String(id) === OVERHEADS_ID) {
+  if (isOverheadsId_(id)) {
     throw new Error('The Company Overheads project can’t be deleted — it collects your production fees and company expenses.');
   }
   return withLock_(function () {
@@ -318,7 +403,10 @@ function listTransactions_() {
       category: String(v[d.col['Category']] || ''),
       purpose: String(v[d.col['Purpose']] || ''),
       statement: String(v[d.col['Statement']] || ''),
-      recorded: formatDate_(v[d.col['Recorded']])
+      recorded: formatDate_(v[d.col['Recorded']]),
+      accountId: String(v[d.col['Account ID']] || '') || DEFAULT_ACCOUNT_ID,
+      companyId: String(v[d.col['Company ID']] || '') || DEFAULT_COMPANY_ID,
+      spender: String(v[d.col['Spender']] || '')
     };
   });
 }
@@ -327,7 +415,8 @@ function listTransactions_() {
  * Appends transactions, skipping any whose hash is already stored
  * (so re-uploading the same statement never creates duplicates).
  * Each txn: {hash, date, description, amount, projectId, projectName,
- *            lineId, lineName, category, purpose, statement}
+ *            lineId, lineName, category, purpose, statement,
+ *            accountId, companyId, spender}
  */
 function saveTransactions(txns) {
   if (!txns || !txns.length) return { saved: 0, duplicates: 0 };
@@ -350,7 +439,10 @@ function saveTransactions(txns) {
         'Project ID': String(t.projectId || ''), 'Project Name': String(t.projectName || ''),
         'Line ID': String(t.lineId || ''), 'Line Name': String(t.lineName || ''),
         'Category': String(t.category || ''), 'Purpose': String(t.purpose || ''),
-        'Statement': String(t.statement || ''), 'Recorded': now
+        'Statement': String(t.statement || ''), 'Recorded': now,
+        'Account ID': String(t.accountId || '') || DEFAULT_ACCOUNT_ID,
+        'Company ID': String(t.companyId || '') || DEFAULT_COMPANY_ID,
+        'Spender': String(t.spender || '')
       }));
     });
     if (rows.length) {

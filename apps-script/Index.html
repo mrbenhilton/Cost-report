@@ -153,6 +153,10 @@
   <header>
     <h1>Project Cost Tracker</h1>
     <span>
+      <label for="company" style="display:inline; margin-right:4px;">Company</label>
+      <select id="company" style="width:auto; padding:4px 6px;" onchange="onCompanyChange()"></select>
+    </span>
+    <span>
       <label for="currency" style="display:inline; margin-right:4px;">Currency</label>
       <select id="currency" style="width:auto; padding:4px 6px;" onchange="onCurrencyChange()">
         <option>£</option><option>$</option><option>€</option><option>kr</option><option>CHF </option>
@@ -250,21 +254,27 @@
   <section id="tab-review" class="hidden">
 
     <div id="review-step-upload" class="card">
-      <h2>Reconcile a bank statement</h2>
+      <h2>Reconcile a statement</h2>
       <p class="small muted" style="margin-top:0;">
-        Export the statement from your online banking as a <b>CSV</b> file, then choose it here.
+        Pick the account, then choose its statement: a <b>CSV</b> export from online banking, or
+        the <b>Amex PDF statement</b> as downloaded (cardmembers are tagged as spenders automatically).
         Re-uploading the same statement is safe — transactions you've already recorded are skipped automatically.
       </p>
       <div class="row">
         <div class="grow">
-          <label for="csv-file">Statement CSV file</label>
-          <input type="file" id="csv-file" accept=".csv,text/csv" onchange="onFileChosen()">
+          <label for="review-account">Account</label>
+          <select id="review-account" onchange="onReviewAccountChange()"></select>
+        </div>
+        <div class="grow">
+          <label for="csv-file">Statement file (CSV, or Amex PDF)</label>
+          <input type="file" id="csv-file" accept=".csv,.pdf,text/csv,application/pdf" onchange="onFileChosen()">
         </div>
         <div class="grow">
           <label for="statement-label">Statement label</label>
           <input type="text" id="statement-label" placeholder="e.g. July 2026">
         </div>
       </div>
+      <div id="review-parsing" class="small muted hidden" style="margin-top:8px;">Reading the statement…</div>
       <details style="margin-top:10px;">
         <summary class="small muted" style="cursor:pointer;">…or paste CSV text instead</summary>
         <textarea id="csv-paste" rows="5" style="margin-top:8px;" placeholder="Date,Description,Amount&#10;01/07/2026,COFFEE SHOP,-4.50"></textarea>
@@ -304,6 +314,7 @@
         <div class="grow hidden" id="map-debit-wrap"><label for="map-debit">Money out column</label><select id="map-debit"></select></div>
         <div class="grow hidden" id="map-credit-wrap"><label for="map-credit">Money in column</label><select id="map-credit"></select></div>
         <div class="grow"><label for="map-notes">Notes / reference column (optional)</label><select id="map-notes"></select></div>
+        <div class="grow"><label for="map-spender">Spender / cardmember column (optional)</label><select id="map-spender"></select></div>
       </div>
       <div class="row" style="margin-top:10px; align-items:center;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
@@ -312,7 +323,7 @@
         </label>
         <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-skip-transfers" checked style="width:auto;">
-          Skip <span id="map-transfers-count">0</span> internal transfers (pots / savings)
+          Skip <span id="map-transfers-count">0</span> internal transfers (pots / savings / card repayments)
         </label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
           <input type="checkbox" id="map-has-header" checked style="width:auto;" onchange="renderMapping()">
@@ -382,6 +393,10 @@
             <input type="text" id="rv-category" list="category-list" placeholder="Choose or type…">
             <datalist id="category-list"></datalist>
           </div>
+          <div class="grow" id="rv-spender-wrap">
+            <label for="rv-spender">Who spent it?</label>
+            <select id="rv-spender"></select>
+          </div>
         </div>
         <hr class="divider">
         <div class="row">
@@ -414,11 +429,16 @@
 
 <script>
   // ------------------------------------------------------------ state
-  var app = { projects: [], budgetLines: [], transactions: [], settings: { currency: '£' } };
+  var app = {
+    companies: [], accounts: [], projects: [], budgetLines: [], transactions: [],
+    settings: { currency: '£' }
+  };
+  /** The company whose projects, statements and reports are on screen. */
+  var currentCompanyId = '';
   var review = {
     rows: [], filename: '', queue: [], idx: 0,
     saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0,
-    skippedTransfers: 0, typeIdx: -1, transferCount: 0
+    skippedTransfers: 0, typeIdx: -1, transferCount: 0, accountId: ''
   };
   var budgetEditor = { lines: [], replaceProjectId: null };
   var beTotalDirty = false;
@@ -430,7 +450,11 @@
   var NO_PROJECT = '__none__';
   var NEW_PROJECT = '__new__';
   var OVERAGE = '__overage__';
+  /** Money moving between the user's own companies — not spend or income. */
+  var INTERCO = '__interco__';
+  var INTERCO_CATEGORY = 'Inter-company';
   var OVERHEADS_ID = 'company-overheads';
+  var DEFAULT_PEOPLE = 'Ben, Glen, Domante';
   /** Line-ID marker for income entries so they never mix with spend. */
   var INCOME_LINE = '__income__';
 
@@ -461,6 +485,7 @@
       app = data;
       app.budgetLines = app.budgetLines || [];
       document.getElementById('loading').classList.add('hidden');
+      initCompanies();
       var cur = document.getElementById('currency');
       if (![].some.call(cur.options, function (o) { return o.value === app.settings.currency; })) {
         var opt = document.createElement('option');
@@ -468,9 +493,6 @@
         cur.appendChild(opt);
       }
       cur.value = app.settings.currency;
-      var d = new Date();
-      document.getElementById('statement-label').value =
-        d.toLocaleString(undefined, { month: 'long' }) + ' ' + d.getFullYear();
       renderAll();
       showTab('projects');
     }).catch(function (e) {
@@ -478,6 +500,56 @@
         'Could not load data: ' + (e && e.message ? e.message : e);
     });
   });
+
+  function initCompanies() {
+    var saved = '';
+    try { saved = localStorage.getItem('companyId') || ''; } catch (e) { /* storage unavailable */ }
+    currentCompanyId = companyById(saved) ? saved : (app.companies[0] ? app.companies[0].id : '');
+    document.getElementById('company').innerHTML = app.companies.map(function (c) {
+      return '<option value="' + esc(c.id) + '">' + esc(c.shortName) + '</option>';
+    }).join('');
+    document.getElementById('company').value = currentCompanyId;
+    renderAccountSelect();
+  }
+
+  function setCompany(id) {
+    if (!companyById(id)) return;
+    currentCompanyId = id;
+    try { localStorage.setItem('companyId', id); } catch (e) { /* storage unavailable */ }
+    document.getElementById('company').value = id;
+  }
+
+  function onCompanyChange() {
+    setCompany(document.getElementById('company').value);
+    // the statement account must belong to the company on screen
+    var acc = accountById(document.getElementById('review-account').value);
+    if (!acc || acc.companyId !== currentCompanyId) renderAccountSelect();
+    renderAll();
+  }
+
+  /** Account picker for statements: this company's accounts first. */
+  function renderAccountSelect() {
+    var sel = document.getElementById('review-account');
+    var prev = sel.value;
+    var mine = app.accounts.filter(function (a) { return a.companyId === currentCompanyId; });
+    sel.innerHTML = mine.map(function (a) {
+      return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>';
+    }).join('');
+    if (mine.some(function (a) { return a.id === prev; })) sel.value = prev;
+    updateStatementLabel();
+  }
+
+  function onReviewAccountChange() {
+    updateStatementLabel();
+  }
+
+  /** Default statement label: "<account> — <Month Year>". */
+  function updateStatementLabel(monthLabel) {
+    var acc = accountById(document.getElementById('review-account').value);
+    var d = new Date();
+    var month = monthLabel || (d.toLocaleString(undefined, { month: 'long' }) + ' ' + d.getFullYear());
+    document.getElementById('statement-label').value = (acc ? acc.name + ' — ' : '') + month;
+  }
 
   function onCurrencyChange() {
     var v = document.getElementById('currency').value;
@@ -510,6 +582,55 @@
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function isIncomeTxn(t) { return t.lineId === INCOME_LINE; }
+  function isIntercoTxn(t) { return !t.projectId && t.category === INTERCO_CATEGORY; }
+
+  function companyById(id) {
+    return app.companies.filter(function (c) { return c.id === id; })[0] || null;
+  }
+  function accountById(id) {
+    return app.accounts.filter(function (a) { return a.id === id; })[0] || null;
+  }
+  function currentCompany() { return companyById(currentCompanyId); }
+  /** Transactions recorded against the company on screen. */
+  function companyTxns() {
+    return app.transactions.filter(function (t) { return t.companyId === currentCompanyId; });
+  }
+  /** The other companies — money to/from them is inter-company. */
+  function otherCompanies() {
+    return app.companies.filter(function (c) { return c.id !== currentCompanyId; });
+  }
+
+  /** People who spend on company cards (Settings tab: people = Ben, Glen, …). */
+  function people() {
+    return String(app.settings.people || DEFAULT_PEOPLE).split(',')
+      .map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+
+  /**
+   * Maps a statement's cardmember name ("BENJAMIN STEPHEN HILTON") to a
+   * person ("Ben") by first name; unknown names are kept, title-cased.
+   */
+  function matchSpender(raw) {
+    var name = String(raw || '').trim();
+    if (!name) return '';
+    var first = name.toLowerCase().split(/\s+/)[0];
+    var hit = people().filter(function (p) {
+      var pl = p.toLowerCase();
+      return first === pl || first.indexOf(pl) === 0 || pl.indexOf(first) === 0;
+    })[0];
+    return hit || titleCase(name);
+  }
+
+  /** Who spent at this merchant on this account last time (for untagged bank cards). */
+  function lastSpenderFor(description, accountId) {
+    var key = String(description || '').toLowerCase().replace(/\s+/g, ' ');
+    var hit = '';
+    app.transactions.forEach(function (t) {
+      if (t.spender && t.accountId === accountId &&
+          String(t.description).toLowerCase().replace(/\s+/g, ' ') === key) hit = t.spender;
+    });
+    return hit;
+  }
 
   function spentByProject() {
     var spent = {};
@@ -532,12 +653,16 @@
   function linesForProject(projectId) {
     return app.budgetLines.filter(function (l) { return l.projectId === projectId; });
   }
-  function isOverheads(id) { return id === OVERHEADS_ID; }
+  function isOverheads(id) { return String(id).indexOf(OVERHEADS_ID) === 0; }
   function clientProjects() {
-    return app.projects.filter(function (p) { return !isOverheads(p.id); });
+    return app.projects.filter(function (p) {
+      return !isOverheads(p.id) && p.companyId === currentCompanyId;
+    });
   }
   function overheadsProject() {
-    return app.projects.filter(function (p) { return isOverheads(p.id); })[0] || null;
+    return app.projects.filter(function (p) {
+      return isOverheads(p.id) && p.companyId === currentCompanyId;
+    })[0] || null;
   }
   /** Production fees across all project budgets = the overheads project's income. */
   function feeIncome() {
@@ -854,7 +979,8 @@
       version: document.getElementById('be-version').value.trim(),
       fee: parseFloat(document.getElementById('be-fee').value) || 0,
       budget: parseFloat(document.getElementById('be-total').value) || 0,
-      notes: ''
+      notes: '',
+      companyId: currentCompanyId
     };
     var errEl = document.getElementById('budget-editor-error');
     errEl.classList.add('hidden');
@@ -899,7 +1025,7 @@
 
   function cancelNewVersion() {
     budgetEditor.replaceProjectId = null;
-    document.getElementById('budget-upload-title').textContent = 'Add a project from a budget';
+    renderProjects();
   }
 
   // ------------------------------------------------------------ projects tab
@@ -908,7 +1034,8 @@
     var host = document.getElementById('project-list');
     // reflect replace-mode in the upload card title
     if (!budgetEditor.replaceProjectId) {
-      document.getElementById('budget-upload-title').textContent = 'Add a project from a budget';
+      document.getElementById('budget-upload-title').textContent =
+        'Add a project from a budget' + (currentCompany() ? ' — ' + currentCompany().shortName : '');
     }
     var clients = clientProjects();
     var html = clients.map(function (p) {
@@ -997,7 +1124,7 @@
     if (!name) { showError('Give the project a name first.'); return; }
     var btn = document.getElementById('p-add');
     btn.disabled = true; btn.textContent = 'Adding…';
-    run('addProject', name, budget, '').then(function (projects) {
+    run('addProject', name, budget, '', currentCompanyId).then(function (projects) {
       app.projects = projects;
       document.getElementById('p-name').value = '';
       document.getElementById('p-budget').value = '';
@@ -1140,12 +1267,113 @@
     if (!input.files || !input.files.length) return;
     var file = input.files[0];
     review.filename = file.name;
-    var label = document.getElementById('statement-label');
-    if (file.name) label.value = file.name.replace(/\.[^.]*$/, '').replace(/[_\-]+/g, ' ').trim() || label.value;
+    var fromName = file.name.replace(/\.[^.]*$/, '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (fromName) updateStatementLabel(fromName);
+    if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+      var busy = document.getElementById('review-parsing');
+      busy.classList.remove('hidden');
+      loadPdfJs().then(function () { return file.arrayBuffer(); })
+        .then(pdfToCellRows)
+        .then(function (cellRows) {
+          var parsed = parseAmexPdfRows(cellRows);
+          if (parsed.rows.length < 2) {
+            throw new Error('no transactions were found. Only Amex PDF statements can be read — for other accounts, download the statement as CSV.');
+          }
+          if (parsed.periodLabel) updateStatementLabel(parsed.periodLabel);
+          loadRows(parsed.rows, 'amex-pdf');
+        })
+        .catch(function (e) {
+          showError('Could not read that PDF: ' + (e && e.message ? e.message : e));
+          input.value = '';
+        })
+        .finally(function () { busy.classList.add('hidden'); });
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function () { loadCsvText(String(reader.result)); };
     reader.onerror = function () { showError('Could not read that file.'); };
     reader.readAsText(file);
+  }
+
+  var AMEX_DATE_RE = /^([A-Z][a-z]{2})\s+(\d{1,2})$/;
+
+  /**
+   * Reads an American Express PDF statement (rows of text cells from
+   * pdfToCellRows) into CSV-like rows:
+   * [Date, Description, Amount, Card Member, Notes, Type] — Amount is
+   * positive for charges, negative for credits (marked CR on the statement).
+   * Transactions are grouped under "New Transactions for <NAME>" headings,
+   * which become the Card Member; the monthly repayment is typed
+   * "Card repayment" so it's skipped as an internal transfer.
+   */
+  function parseAmexPdfRows(cellRows) {
+    var endYear = null, endMonth = null, periodLabel = '';
+    cellRows.forEach(function (cells) {
+      var j = cells.join(' ');
+      var m = j.match(/From\s+\d{1,2}\s+([A-Za-z]+)(?:\s+(\d{4}))?\s+to\s+\d{1,2}\s+([A-Za-z]+)\s+(\d{4})/i);
+      if (m && endYear === null) {
+        endYear = parseInt(m[4], 10);
+        endMonth = MONTHS[m[3].slice(0, 3).toLowerCase()] || null;
+        periodLabel = m[1].slice(0, 3) + '–' + m[3].slice(0, 3) + ' ' + m[4];
+      }
+    });
+    if (endYear === null) {
+      // fall back to the statement date ("10/09/26") in the header block
+      cellRows.some(function (cells) {
+        var d = cells.filter(function (c) { return /^\d{2}\/\d{2}\/\d{2}$/.test(c); })[0];
+        if (!d) return false;
+        var parts = d.split('/');
+        endYear = 2000 + parseInt(parts[2], 10);
+        endMonth = parseInt(parts[1], 10);
+        return true;
+      });
+    }
+    if (endYear === null) { endYear = new Date().getFullYear(); endMonth = 12; }
+
+    var out = [['Date', 'Description', 'Amount', 'Card Member', 'Notes', 'Type']];
+    var member = '';
+    var last = null, extra = 0;
+    cellRows.forEach(function (cells) {
+      var j = cells.join(' ').trim();
+      var m;
+      if ((m = j.match(/^New Transactions for (.+)$/i))) { member = m[1].trim(); last = null; return; }
+      if (/^other account transactions$/i.test(j)) { member = ''; last = null; return; }
+      if (/^total\b/i.test(j)) { last = null; return; }
+      if (cells.length >= 3 && AMEX_DATE_RE.test(cells[0]) && AMEX_DATE_RE.test(cells[1])) {
+        var amount = parseAmount(cells[cells.length - 1]);
+        if (isNaN(amount)) { last = null; return; }
+        var dm = cells[0].match(AMEX_DATE_RE);
+        var mon = MONTHS[dm[1].toLowerCase()];
+        var year = endMonth && mon > endMonth ? endYear - 1 : endYear;
+        var details = cells.slice(2, -1);
+        var notes = '';
+        // a numeric cell before the amount is the foreign-currency spend
+        if (details.length > 1 && /\d/.test(details[details.length - 1]) &&
+            !isNaN(parseAmount(details[details.length - 1]))) {
+          notes = 'Foreign spend ' + details.pop();
+        }
+        var desc = details.join(' ').replace(/\s+/g, ' ').trim();
+        last = [isoDate(year, mon, dm[2]), desc, String(amount), member, notes,
+          /payment received/i.test(desc) ? 'Card repayment' : ''];
+        out.push(last);
+        extra = 0;
+        return;
+      }
+      if (!last) return;
+      if (j === 'CR') {
+        if (parseFloat(last[2]) > 0) last[2] = String(-parseFloat(last[2]));
+        return;
+      }
+      // short continuation lines under a transaction (e.g. "GOODS", FX details)
+      if (extra < 2 && cells.length <= 2 &&
+          !/^(transaction|date|prepared for|statement of|american express|card number|page\b)/i.test(j)) {
+        last[4] = (last[4] ? last[4] + ' · ' : '') + j;
+        extra++;
+        return;
+      }
+      last = null;
+    });
+    return { rows: out, periodLabel: periodLabel };
   }
 
   function onPasteCsv() {
@@ -1155,9 +1383,14 @@
   }
 
   function loadCsvText(text) {
-    var rows = parseCSV(text);
+    loadRows(parseCSV(text), 'csv');
+  }
+
+  function loadRows(rows, source) {
     if (rows.length < 1) { showError('That file appears to be empty.'); return; }
     review.rows = rows;
+    review.source = source;
+    review.accountId = document.getElementById('review-account').value;
     document.getElementById('review-step-upload').classList.add('hidden');
     document.getElementById('review-step-done').classList.add('hidden');
     document.getElementById('review-step-map').classList.remove('hidden');
@@ -1176,7 +1409,20 @@
 
   /** Internal moves between the account's own pots/spaces — not real spend. */
   function isInternalTransfer(value) {
-    return /pot\s*transfer|internal\s*transfer/i.test(String(value || ''));
+    return /pot\s*transfer|internal\s*transfer|card\s*repayment/i.test(String(value || ''));
+  }
+
+  /**
+   * Rows that just move money between the user's own accounts: pot
+   * transfers (Type column), and the monthly Amex repayment — which shows
+   * as a payment received on the Amex statement and as a payment to
+   * American Express on the bank statement.
+   */
+  function isTransferRow(typeValue, desc, account) {
+    if (isInternalTransfer(typeValue)) return true;
+    var d = String(desc || '');
+    if (account && account.kind === 'amex') return /payment received/i.test(d);
+    return /american\s*express|\bamex\b/i.test(d);
   }
 
   function renderMapping() {
@@ -1197,25 +1443,30 @@
     var gCredit = guessColumn(headers, [/credit/, /money in/, /paid in/, /deposit/, /in\b/]);
     var gAmount = guessColumn(headers, [/^amount$/, /amount/, /value/, /^sum$/]);
     var gNotes = guessColumn(headers, [/notes/, /note\b/, /reference/, /memo/]);
+    var gSpender = guessColumn(headers, [/card\s*member/, /cardholder/, /card\s*holder/, /spender/]);
     fill('map-date', gDate === -1 ? 0 : gDate, false);
     fill('map-desc', gDesc === -1 ? Math.min(1, headers.length - 1) : gDesc, false);
     fill('map-amount', gAmount === -1 ? headers.length - 1 : gAmount, false);
     fill('map-debit', gDebit, true);
     fill('map-credit', gCredit, true);
     fill('map-notes', gNotes, true);
+    fill('map-spender', gSpender, true);
     var mode = (gDebit !== -1 && gCredit !== -1 && gAmount === -1) ? 'two' : 'single';
     document.getElementById('map-amountmode').value = mode;
+    // Amex (PDF or CSV export) shows charges as positive amounts
+    var account = accountById(review.accountId);
+    document.getElementById('map-sign').value =
+      (account && account.kind === 'amex') || review.source === 'amex-pdf' ? 'posout' : 'negout';
     renderMappingAmountFields();
     document.getElementById('map-datefmt').value = 'auto';
 
     // internal pot/savings transfers (e.g. Monzo pots) can be skipped in bulk
     review.typeIdx = guessColumn(headers, [/^type$/, /transaction\s*type/]);
     var transferCount = 0;
-    if (review.typeIdx !== -1) {
-      review.rows.slice(hasHeader ? 1 : 0).forEach(function (r) {
-        if (isInternalTransfer(r[review.typeIdx])) transferCount++;
-      });
-    }
+    var descGuess = parseInt(document.getElementById('map-desc').value, 10);
+    review.rows.slice(hasHeader ? 1 : 0).forEach(function (r) {
+      if (isTransferRow(review.typeIdx >= 0 ? r[review.typeIdx] : '', r[descGuess], account)) transferCount++;
+    });
     review.transferCount = transferCount;
     document.getElementById('map-transfers-count').textContent = String(transferCount);
     document.getElementById('map-skip-transfers-wrap').classList.toggle('hidden', !transferCount);
@@ -1249,7 +1500,10 @@
     var sign = document.getElementById('map-sign').value;
     var skipIncome = document.getElementById('map-skip-income').checked;
     var notesIdx = parseInt(document.getElementById('map-notes').value, 10);
-    var skipTransfers = document.getElementById('map-skip-transfers').checked && review.typeIdx >= 0;
+    var spenderIdx = parseInt(document.getElementById('map-spender').value, 10);
+    var skipTransfers = document.getElementById('map-skip-transfers').checked && review.transferCount > 0;
+    var account = accountById(review.accountId);
+    if (!account) { errEl.textContent = 'Choose which account this statement is from.'; errEl.classList.remove('hidden'); return; }
     var fmtChoice = document.getElementById('map-datefmt').value;
 
     var dataRows = review.rows.slice(hasHeader ? 1 : 0);
@@ -1268,8 +1522,11 @@
     var invalid = 0;
 
     dataRows.forEach(function (r) {
-      if (skipTransfers && isInternalTransfer(r[review.typeIdx])) { review.skippedTransfers++; return; }
       var desc = String(r[descIdx] == null ? '' : r[descIdx]).trim();
+      if (skipTransfers && isTransferRow(review.typeIdx >= 0 ? r[review.typeIdx] : '', desc, account)) {
+        review.skippedTransfers++;
+        return;
+      }
       var amountOut;
       if (mode === 'two') {
         var deb = debitIdx >= 0 ? parseAmount(r[debitIdx]) : NaN;
@@ -1287,12 +1544,16 @@
       if (amountOut <= 0 && skipIncome) { review.skippedIncome++; return; }
 
       var key = date + '|' + desc.toLowerCase().replace(/\s+/g, ' ') + '|' + amountOut.toFixed(2);
+      // the original bank account keeps un-prefixed fingerprints so existing records still dedupe
+      if (account.id !== 'fw-monzo') key = account.id + '|' + key;
       occ[key] = (occ[key] || 0) + 1;
       var hash = hashTxn(key + '|' + occ[key]);
       if (known[hash]) { review.duplicates++; return; }
       review.queue.push({
         hash: hash, date: date, description: desc, amount: amountOut,
-        note: notesIdx >= 0 ? String(r[notesIdx] == null ? '' : r[notesIdx]).trim() : ''
+        note: notesIdx >= 0 ? String(r[notesIdx] == null ? '' : r[notesIdx]).trim() : '',
+        spender: spenderIdx >= 0 ? matchSpender(r[spenderIdx]) : '',
+        accountId: account.id, companyId: account.companyId
       });
     });
 
@@ -1322,7 +1583,10 @@
     document.getElementById('review-progress-fill').style.width =
       (review.idx / total * 100).toFixed(1) + '%';
 
-    document.getElementById('rv-date').textContent = t.date;
+    // keep the project lists on the statement's company even if the switcher moved
+    if (t.companyId && t.companyId !== currentCompanyId) setCompany(t.companyId);
+    var acc = accountById(t.accountId);
+    document.getElementById('rv-date').textContent = t.date + (acc ? ' · ' + acc.name : '');
     var amtEl = document.getElementById('rv-amount');
     amtEl.textContent = t.amount >= 0 ? fmt(t.amount) : '+' + fmt(-t.amount) + ' in';
     amtEl.classList.toggle('credit', t.amount < 0);
@@ -1342,10 +1606,13 @@
     document.getElementById('category-list').innerHTML =
       allCategories().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
 
+    renderSpenderSelect(t);
+
     var sel = document.getElementById('rv-project');
     var prev = sel.value;
     rebuildProjectSelect(sel);
-    if (prev && [].some.call(sel.options, function (o) { return o.value === prev; })) sel.value = prev;
+    if (prev && prev !== INTERCO && [].some.call(sel.options, function (o) { return o.value === prev; })) sel.value = prev;
+    if (looksInterCompany(t.description + ' ' + (t.note || ''))) sel.value = INTERCO;
     onReviewProjectChange();
 
     // money-in → income allocation UI instead of project + budget line
@@ -1355,13 +1622,42 @@
     document.getElementById('rv-income').classList.toggle('hidden', !isIncome);
     document.getElementById('rv-newproject').classList.toggle('hidden',
       isIncome || sel.value !== NEW_PROJECT);
+    document.getElementById('rv-spender-wrap').classList.toggle('hidden', isIncome);
     if (isIncome) {
       document.getElementById('rv-category-wrap').classList.add('hidden');
       document.getElementById('rv-income-rows').innerHTML = '';
       addIncomeSplitRow(-t.amount);
+      if (looksInterCompany(t.description + ' ' + (t.note || ''))) {
+        document.querySelector('#rv-income-rows .is-proj').value = INTERCO;
+      }
       updateIncomeRemaining();
     }
     document.getElementById('rv-purpose').focus();
+  }
+
+  /** Spender picker: prefilled from the statement's cardmember, else who spent here last time. */
+  function renderSpenderSelect(t) {
+    var sel = document.getElementById('rv-spender');
+    var names = people();
+    var guess = t.spender || lastSpenderFor(t.description, t.accountId);
+    if (guess && names.indexOf(guess) === -1) names = names.concat([guess]);
+    sel.innerHTML = '<option value="">— not tagged —</option>' +
+      names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+    sel.value = guess || '';
+  }
+
+  /** Mentions of another of the user's companies suggest an inter-company transfer. */
+  function looksInterCompany(text) {
+    var hay = String(text || '').toLowerCase();
+    return otherCompanies().some(function (c) {
+      var word = String(c.shortName || c.name).toLowerCase().split(/\s+/)[0];
+      return word.length >= 4 && hay.indexOf(word) !== -1;
+    });
+  }
+
+  function intercoLabel() {
+    var others = otherCompanies().map(function (c) { return c.shortName; }).join(' / ');
+    return 'Inter-company' + (others ? ' — ' + others : '') + ' (loan / transfer)';
   }
 
   // ------------------------------------------------------- VAT handling
@@ -1407,6 +1703,7 @@
       return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
     }).join('') +
       (oh ? '<option value="' + oh.id + '">Company Overheads (other income)</option>' : '') +
+      (otherCompanies().length ? '<option value="' + INTERCO + '">' + esc(intercoLabel()) + '</option>' : '') +
       '<option value="' + NO_PROJECT + '">Ignore (not project income)</option>';
   }
 
@@ -1458,7 +1755,11 @@
       var projectId = rows[i].querySelector('.is-proj').value;
       var amount = parseFloat(rows[i].querySelector('.is-amt').value);
       if (isNaN(amount) || amount <= 0) return null;
-      parts.push({ projectId: projectId === NO_PROJECT ? '' : projectId, amount: amount });
+      parts.push({
+        projectId: projectId === NO_PROJECT || projectId === INTERCO ? '' : projectId,
+        interco: projectId === INTERCO,
+        amount: amount
+      });
     }
     var sum = parts.reduce(function (s, p) { return s + p.amount; }, 0);
     if (Math.abs(sum - total) > 0.01) return null;
@@ -1470,6 +1771,7 @@
     sel.innerHTML =
       clientProjects().map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') +
       (oh ? '<option value="' + oh.id + '">Company Overheads (company expense)</option>' : '') +
+      (otherCompanies().length ? '<option value="' + INTERCO + '">' + esc(intercoLabel()) + '</option>' : '') +
       '<option value="' + NO_PROJECT + '">Ignore (personal / transfer)</option>' +
       '<option value="' + NEW_PROJECT + '">＋ New project…</option>';
   }
@@ -1481,11 +1783,11 @@
 
     var lineWrap = document.getElementById('rv-line-wrap');
     var lineSel = document.getElementById('rv-line');
-    var lines = (val && val !== NO_PROJECT && val !== NEW_PROJECT) ? linesForProject(val) : [];
+    var lines = (val && val !== NO_PROJECT && val !== NEW_PROJECT && val !== INTERCO) ? linesForProject(val) : [];
     if (!lines.length) {
       lineWrap.classList.add('hidden');
       lineSel.innerHTML = '';
-      document.getElementById('rv-category-wrap').classList.remove('hidden');
+      document.getElementById('rv-category-wrap').classList.toggle('hidden', val === INTERCO);
       return;
     }
     lineSel.innerHTML = lineOptionsHtml(lines);
@@ -1524,7 +1826,7 @@
     if (!name) { showError('Give the new project a name.'); return; }
     var btn = document.getElementById('rv-np-add');
     btn.disabled = true; btn.textContent = 'Creating…';
-    run('addProject', name, budget, '').then(function (projects) {
+    run('addProject', name, budget, '', currentCompanyId).then(function (projects) {
       app.projects = projects;
       var created = projects.filter(function (p) { return p.name === name; }).pop();
       var sel = document.getElementById('rv-project');
@@ -1555,6 +1857,9 @@
         category = document.getElementById('rv-category').value.trim() || 'Overage';
         lineName = 'Overage';
       }
+    } else if (projSel === INTERCO) {
+      category = INTERCO_CATEGORY;
+      lineName = INTERCO_CATEGORY;
     } else {
       category = document.getElementById('rv-category').value.trim();
     }
@@ -1573,7 +1878,10 @@
       lineName: lineName,
       category: category,
       purpose: document.getElementById('rv-purpose').value.trim(),
-      statement: document.getElementById('statement-label').value.trim()
+      statement: document.getElementById('statement-label').value.trim(),
+      accountId: t.accountId,
+      companyId: t.companyId,
+      spender: document.getElementById('rv-spender').value
     };
     var saveBtn = document.getElementById('rv-save');
     var skipBtn = document.getElementById('rv-skip');
@@ -1619,8 +1927,11 @@
         vat: -Math.round((partGross - part.amount) * 100) / 100,
         projectId: proj ? proj.id : '',
         projectName: proj ? proj.name : '',
-        lineId: INCOME_LINE, lineName: 'Income', category: 'Income',
-        purpose: purpose, statement: statement
+        lineId: part.interco ? '' : INCOME_LINE,
+        lineName: part.interco ? INTERCO_CATEGORY : 'Income',
+        category: part.interco ? INTERCO_CATEGORY : 'Income',
+        purpose: purpose, statement: statement,
+        accountId: t.accountId, companyId: t.companyId, spender: ''
       };
     });
     var saveBtn = document.getElementById('rv-save');
@@ -1647,7 +1958,7 @@
       var bits = ['Recorded ' + review.saved + ' transaction(s).'];
       if (review.skipped) bits.push(review.skipped + ' skipped — they’ll come up again if you re-upload this statement.');
       if (review.duplicates) bits.push(review.duplicates + ' had already been recorded before.');
-      if (review.skippedTransfers) bits.push(review.skippedTransfers + ' internal pot/savings transfer(s) were left out.');
+      if (review.skippedTransfers) bits.push(review.skippedTransfers + ' internal transfer(s) / card repayment(s) were left out.');
       if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
       document.getElementById('review-summary').textContent = bits.join(' ');
       renderAll();
@@ -1657,7 +1968,7 @@
   }
 
   function resetReview() {
-    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, skippedTransfers: 0, typeIdx: -1, transferCount: 0 };
+    review = { rows: [], filename: '', queue: [], idx: 0, saved: 0, skipped: 0, duplicates: 0, skippedIncome: 0, skippedTransfers: 0, typeIdx: -1, transferCount: 0, accountId: '', source: '' };
     document.getElementById('csv-file').value = '';
     document.getElementById('review-step-map').classList.add('hidden');
     document.getElementById('review-step-cards').classList.add('hidden');
@@ -1676,7 +1987,13 @@
     app.projects.forEach(function (p) { knownIds[p.id] = true; });
     var orphans = {};
     var nonProject = { total: 0, count: 0 };
-    app.transactions.forEach(function (t) {
+    var interco = { out: 0, in: 0, count: 0 };
+    companyTxns().forEach(function (t) {
+      if (isIntercoTxn(t)) {
+        if (t.amount >= 0) interco.out += t.amount; else interco.in += -t.amount;
+        interco.count++;
+        return;
+      }
       if (isIncomeTxn(t)) return;   // income is reported separately
       if (!t.projectId) { nonProject.total += t.amount; nonProject.count++; return; }
       if (!knownIds[t.projectId]) {
@@ -1704,7 +2021,7 @@
     document.getElementById('report-statements').innerHTML = statementBreakdownHtml();
 
     var host = document.getElementById('report-projects');
-    if (!clients.length && !app.transactions.length) {
+    if (!clients.length && !companyTxns().length) {
       host.innerHTML = '<div class="card muted">Nothing here yet — upload a budget to create a project, then reconcile a statement.</div>';
       document.getElementById('report-nonproject').innerHTML = '';
       return;
@@ -1719,10 +2036,17 @@
     });
     host.innerHTML = html;
 
-    document.getElementById('report-nonproject').innerHTML = nonProject.count
-      ? '<div class="card small muted">' + nonProject.count + ' transaction(s) totalling ' +
-        fmt(nonProject.total) + ' were ignored (personal / transfers).</div>'
-      : '';
+    document.getElementById('report-nonproject').innerHTML =
+      (interco.count
+        ? '<div class="card small">Inter-company (' + esc(otherCompanies().map(function (c) { return c.shortName; }).join(' / ')) +
+          '): ' + fmt(interco.out) + ' paid out, ' + fmt(interco.in) + ' received — ' +
+          'net ' + fmt(interco.out - interco.in) + (interco.out >= interco.in ? ' owed to ' : ' owed by ') +
+          esc(currentCompany() ? currentCompany().shortName : 'this company') + '. Kept out of project costs and income.</div>'
+        : '') +
+      (nonProject.count
+        ? '<div class="card small muted">' + nonProject.count + ' transaction(s) totalling ' +
+          fmt(nonProject.total) + ' were ignored (personal / transfers).</div>'
+        : '');
   }
 
   function overheadsReportCard(oh, spentAmt) {
@@ -1751,7 +2075,7 @@
     var rowsHtml = expenses.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; })
       .map(function (t) {
         return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
-          (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
+          (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + txnSourceHtml(t) + '</td>' +
           '<td>' + esc(t.category || '') + '</td><td>' + esc(t.statement) + '</td>' +
           '<td class="num">' + fmt(t.amount) +
           (t.vat ? '<div class="muted small">+ ' + fmt(Math.abs(t.vat)) + ' VAT</div>' : '') + '</td>' +
@@ -1777,14 +2101,16 @@
    * shows how every statement's spending fanned out across them.
    */
   function statementBreakdownHtml() {
-    if (!app.transactions.length) return '';
+    var txns = companyTxns();
+    if (!txns.length) return '';
     var stmts = {};   // label -> {byProject: {name: total}, ignored, income, total, latestDate}
-    app.transactions.forEach(function (t) {
+    txns.forEach(function (t) {
       var label = t.statement || '(no statement label)';
       var s = stmts[label];
-      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, income: 0, vat: 0, total: 0, latestDate: '' };
+      if (!s) s = stmts[label] = { byProject: {}, ignored: 0, interco: 0, income: 0, vat: 0, total: 0, latestDate: '' };
       if (t.date > s.latestDate) s.latestDate = t.date;
       if (t.vat > 0) s.vat += t.vat;
+      if (isIntercoTxn(t)) { s.interco += t.amount; return; }
       if (isIncomeTxn(t)) {
         if (t.projectId) s.income += -t.amount;
         return;
@@ -1813,6 +2139,10 @@
         html += '<tr><td style="padding-left:24px;" class="muted">VAT on costs (excluded from budgets)</td>' +
           '<td class="num muted">' + fmt(s.vat) + '</td></tr>';
       }
+      if (s.interco) {
+        html += '<tr><td style="padding-left:24px;" class="muted">Inter-company (net ' + (s.interco > 0 ? 'paid out' : 'received') + ')</td>' +
+          '<td class="num muted">' + fmt(Math.abs(s.interco)) + '</td></tr>';
+      }
       if (s.ignored) {
         html += '<tr><td style="padding-left:24px;" class="muted">Ignored (personal / transfers)</td>' +
           '<td class="num muted">' + fmt(s.ignored) + '</td></tr>';
@@ -1824,6 +2154,15 @@
       '<div class="table-scroll"><table>' +
       '<tr><th>Statement / project</th><th class="num">Spent</th></tr>' + rows +
       '</table></div></div>';
+  }
+
+  /** "Glen · Filmworks Amex" under a transaction's description. */
+  function txnSourceHtml(t) {
+    var acc = accountById(t.accountId);
+    var bits = [];
+    if (t.spender) bits.push(esc(t.spender));
+    if (acc) bits.push(esc(acc.name));
+    return bits.length ? '<div class="muted small">' + bits.join(' · ') + '</div>' : '';
   }
 
   function tileHtml(label, value, negative) {
@@ -1845,7 +2184,7 @@
         var income = isIncomeTxn(t);
         var assigned = t.lineName || t.category || '';
         return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
-          (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + '</td>' +
+          (t.purpose ? '<div class="muted">' + esc(t.purpose) + '</div>' : '') + txnSourceHtml(t) + '</td>' +
           '<td>' + esc(assigned) +
           (!income && t.lineId && t.category ? '<div class="muted">' + esc(t.category) + '</div>' : '') + '</td>' +
           '<td>' + esc(t.statement) + '</td>' +
@@ -1943,7 +2282,10 @@
       projectId: p.id, projectName: p.name,
       lineId: lineId, lineName: lineName, category: category,
       purpose: document.getElementById('mx-purpose').value.trim(),
-      statement: 'Manual entry'
+      statement: 'Manual entry',
+      accountId: 'manual',
+      companyId: p.companyId,
+      spender: ''
     };
     var btn = document.getElementById('mx-save');
     btn.disabled = true; btn.textContent = 'Saving…';
