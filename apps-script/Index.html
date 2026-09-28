@@ -145,6 +145,20 @@
   #loading { text-align: center; color: var(--muted); padding: 60px 0; }
   .proj-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
   .amounts { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  /* Receipts & bills */
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px;
+    background: var(--accent-soft); color: var(--ink); vertical-align: 1px; }
+  .badge.warn { background: none; border: 1px solid var(--critical); color: var(--critical); }
+  .doc-row { border-top: 1px solid var(--hairline); padding: 10px 0; }
+  .doc-row:first-of-type { border-top: none; }
+  .doc-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .doc-amount { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .flag { color: var(--critical); font-size: 13px; }
+  .addr { font-size: 13px; user-select: all; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+  .actions select { width: auto; flex: 1; min-width: 200px; padding: 5px 8px; font-size: 13px; }
+  .actions .btn { padding: 5px 12px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -169,6 +183,7 @@
     <button id="nav-projects" class="active" onclick="showTab('projects')">Projects</button>
     <button id="nav-review" onclick="showTab('review')">Reconcile statement</button>
     <button id="nav-report" onclick="showTab('report')">Cost report</button>
+    <button id="nav-docs" onclick="showTab('docs')">Receipts &amp; bills</button>
   </nav>
 
   <div id="loading">Loading your data…</div>
@@ -425,6 +440,17 @@
     <div id="report-projects"></div>
     <div id="report-nonproject"></div>
   </section>
+
+  <!-- ========================== RECEIPTS & BILLS ========================== -->
+  <section id="tab-docs" class="hidden">
+    <div id="docs-notice" class="notice hidden"></div>
+    <div id="docs-intake"></div>
+    <div id="docs-attention"></div>
+    <div id="docs-bills"></div>
+    <div id="docs-missing"></div>
+    <div id="docs-monthend"></div>
+    <div id="docs-matched"></div>
+  </section>
 </div>
 
 <script>
@@ -484,6 +510,7 @@
     run('getAppData').then(function (data) {
       app = data;
       app.budgetLines = app.budgetLines || [];
+      app.documents = app.documents || [];
       document.getElementById('loading').classList.add('hidden');
       initCompanies();
       var cur = document.getElementById('currency');
@@ -560,15 +587,20 @@
 
   // ------------------------------------------------------------ tabs
   function showTab(name) {
-    ['projects', 'review', 'report'].forEach(function (t) {
+    ['projects', 'review', 'report', 'docs'].forEach(function (t) {
       document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
       document.getElementById('nav-' + t).classList.toggle('active', t === name);
     });
     if (name === 'report') renderReport();
     if (name === 'projects') renderProjects();
+    if (name === 'docs') { renderDocs(); autoMatch(); }
   }
 
-  function renderAll() { renderProjects(); renderReport(); }
+  function renderAll() {
+    renderProjects();
+    renderReport();
+    if (!document.getElementById('tab-docs').classList.contains('hidden')) renderDocs();
+  }
 
   // ------------------------------------------------------------ helpers
   function esc(s) {
@@ -602,8 +634,11 @@
 
   /** People who spend on company cards (Settings tab: people = Ben, Glen, …). */
   function people() {
+    if (app.intake && app.intake.people && app.intake.people.length) {
+      return app.intake.people.map(function (p) { return p.name; });
+    }
     return String(app.settings.people || DEFAULT_PEOPLE).split(',')
-      .map(function (x) { return x.trim(); }).filter(Boolean);
+      .map(function (x) { return x.replace(/<[^>]*>/, '').trim(); }).filter(Boolean);
   }
 
   /**
@@ -1962,6 +1997,7 @@
       if (review.skippedIncome) bits.push(review.skippedIncome + ' incoming payment(s) were left out.');
       document.getElementById('review-summary').textContent = bits.join(' ');
       renderAll();
+      autoMatch();
     } else {
       renderReviewCard();
     }
@@ -2162,6 +2198,9 @@
     var bits = [];
     if (t.spender) bits.push(esc(t.spender));
     if (acc) bits.push(esc(acc.name));
+    var doc = docForTxn(t.hash);
+    if (doc) bits.push(docLinkHtml(doc, '📎 ' + (doc.kind === 'invoice' ? 'bill' : 'receipt')));
+    else if (t.receipt === 'not-needed') bits.push('no receipt needed');
     return bits.length ? '<div class="muted small">' + bits.join(' · ') + '</div>' : '';
   }
 
@@ -2392,6 +2431,641 @@
       app.transactions = txns;
       renderAll();
     }).catch(function (e) { showError(e.message); });
+  }
+  // ======================================================== receipts & bills
+  var docsUi = { missingPeriod: '', packPeriod: '', pack: null, busy: false };
+
+  function docsNotice(msg, isError) {
+    var el = document.getElementById('docs-notice');
+    el.textContent = msg;
+    el.classList.toggle('error-banner', !!isError);
+    el.classList.remove('hidden');
+    setTimeout(function () { el.classList.add('hidden'); }, 10000);
+  }
+
+  function docForTxn(hash) {
+    return (app.documents || []).filter(function (d) {
+      return d.txnHash === hash && d.status === 'matched';
+    })[0] || null;
+  }
+
+  /** hash -> document, for transactions that already have a receipt or bill. */
+  function linkedTxns() {
+    var map = {};
+    (app.documents || []).forEach(function (d) {
+      if (d.status === 'matched' && d.txnHash) map[d.txnHash] = d;
+    });
+    return map;
+  }
+
+  /** This company's documents, plus shared-inbox ones whose company isn't known yet. */
+  function companyDocs() {
+    return (app.documents || []).filter(function (d) { return d.companyId === currentCompanyId || !d.companyId; });
+  }
+
+  function docLinkHtml(doc, label) {
+    return doc.fileUrl
+      ? '<a href="' + esc(doc.fileUrl) + '" target="_blank" rel="noopener">' + esc(label || 'view') + ' ↗</a>'
+      : esc(label || '');
+  }
+
+  function docAmount(doc) {
+    if (doc.currency && doc.currency !== 'GBP') return doc.currency + ' ' + Number(doc.gross || 0).toFixed(2);
+    return fmt(doc.gross || 0);
+  }
+
+  function txnGross(t) { return Math.abs(t.gross || t.amount || 0); }
+
+  /**
+   * Transactions that should have a receipt: money out on a bank or card
+   * account, allocated to a project or overheads — not income, inter-company,
+   * ignored items or manual entries.
+   */
+  function needsReceipt(t) {
+    if (isIncomeTxn(t) || isIntercoTxn(t) || !t.projectId) return false;
+    if (t.accountId === 'manual' || String(t.hash).indexOf('~') !== -1) return false;
+    return (t.gross || t.amount) > 0;
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+  }
+
+  var SUPPLIER_NOISE = { limited: 1, services: 1, service: 1, london: 1, store: 1, stores: 1, group: 1, company: 1, online: 1, payments: 1, international: 1 };
+
+  /** Does the statement description mention the supplier? */
+  function supplierHit(doc, t) {
+    var desc = String(t.description || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+    var compact = desc.replace(/ /g, '');
+    return String(doc.supplier || '').toLowerCase().split(/[^a-z0-9]+/).some(function (w) {
+      return w.length >= 4 && !SUPPLIER_NOISE[w] && (desc.indexOf(w) !== -1 || compact.indexOf(w) !== -1);
+    });
+  }
+
+  /**
+   * Transactions a document could belong to, best first. Receipts: same
+   * amount, card payment 3 days before to 10 days after the receipt date.
+   * Bills: same amount, paid up to 4 months after the invoice date.
+   * Foreign-currency documents can't be matched on amount, so they need
+   * the supplier name to appear on the statement.
+   */
+  function candidatesFor(doc, taken) {
+    var foreign = doc.currency && doc.currency !== 'GBP';
+    var ref = doc.date || doc.received;
+    // a document whose company isn't known can match either company's payments
+    var pool = doc.companyId ? companyTxns() : app.transactions;
+    return pool.filter(function (t) {
+      return needsReceipt(t) && !taken[t.hash];
+    }).map(function (t) {
+      var diff = daysBetween(ref, t.date);
+      var inWindow = doc.kind === 'invoice' ? diff >= -7 && diff <= 120 : diff >= -3 && diff <= 10;
+      var amountOk = !foreign && Math.abs(txnGross(t) - doc.gross) < 0.015;
+      var sup = supplierHit(doc, t);
+      var score = (amountOk ? 50 : 0) + (sup ? 20 : 0) +
+        (inWindow ? Math.max(0, 25 - Math.abs(diff)) : 0) +
+        (doc.spender && doc.spender === t.spender ? 5 : 0);
+      return { t: t, score: score, amountOk: amountOk, sup: sup, plausible: inWindow && (amountOk || (foreign && sup)) };
+    }).filter(function (c) { return c.plausible; })
+      .sort(function (a, b) { return b.score - a.score; });
+  }
+
+  /**
+   * Links every document with exactly one same-amount transaction in its
+   * date window. Anything ambiguous is left for you to pick.
+   */
+  function autoMatch() {
+    if (autoMatch.running) return;
+    var taken = linkedTxns();
+    var pairs = [];
+    companyDocs().filter(function (d) {
+      return d.status === 'new' && (d.kind === 'receipt' || d.kind === 'invoice') && d.gross > 0;
+    }).sort(function (a, b) { return (a.date || a.received) < (b.date || b.received) ? -1 : 1; })
+      .forEach(function (d) {
+        var exact = candidatesFor(d, taken).filter(function (c) { return c.amountOk; });
+        if (exact.length === 1 || (exact.length > 1 && exact[0].sup && !exact[1].sup)) {
+          pairs.push({ docId: d.id, txnHash: exact[0].t.hash });
+          taken[exact[0].t.hash] = d;
+        }
+      });
+    if (!pairs.length) return;
+    autoMatch.running = true;
+    run('linkDocuments', pairs).then(function (res) {
+      app.documents = res.documents;
+      app.transactions = res.transactions;
+      renderAll();
+      docsNotice('Matched ' + pairs.length + ' receipt' + (pairs.length === 1 ? '' : 's') + '/bill' +
+        (pairs.length === 1 ? '' : 's') + ' to transactions automatically.');
+    }).catch(function (e) { docsNotice('Auto-matching failed: ' + e.message, true); })
+      .finally(function () { autoMatch.running = false; });
+  }
+
+  function renderDocs() {
+    renderIntakeCard();
+    renderAttention();
+    renderBills();
+    renderMissing();
+    renderMonthEnd();
+    renderMatched();
+  }
+
+  // ------------------------------------------------------------ intake card
+  function renderIntakeCard() {
+    var info = app.intake || { addresses: [] };
+    var mine = (info.addresses || []).filter(function (a) { return a.companyId === currentCompanyId; });
+    var shared = (info.addresses || []).filter(function (a) { return a.shared; })[0];
+    var last = info.lastRun;
+    var lastHtml = last
+      ? 'Last check ' + esc(new Date(last.at).toLocaleString()) + ': ' +
+        (last.error ? '<span class="flag">' + esc(last.error) + '</span>'
+          : last.processed + ' new document(s)' + (last.errors ? ', ' + last.errors + ' couldn’t be read' : '') +
+            (last.remaining ? ' — more waiting, check again' : ''))
+      : 'Not checked yet.';
+    var keyHtml = info.hasApiKey
+      ? '<span class="small">Claude API key ✓</span> <button class="linklike" onclick="document.getElementById(\'key-row\').classList.toggle(\'hidden\')">change</button>'
+      : '<span class="small flag">Add your Claude API key so documents can be read.</span>';
+    document.getElementById('docs-intake').innerHTML =
+      '<div class="card"><h2>Email receipts &amp; bills in</h2>' +
+      (shared
+        ? '<p class="small" style="margin-top:0;">Everyone sends receipts, photos and supplier bills to <b class="addr">' + esc(shared.address) +
+          '</b> — Claude works out whether each is a receipt or a bill and which company it’s for. Chase emails ask for replies there too.</p>' +
+          '<p class="small muted">To force the type and company (e.g. a receipt with no company name on it), use:</p>'
+        : '<p class="small muted" style="margin-top:0;">Send or forward to these addresses (they arrive in your normal inbox).</p>') +
+      '<table><tr><th>Receipts (already paid)</th><td class="addr">' +
+      esc((mine.filter(function (a) { return a.kind === 'receipt'; })[0] || {}).address || '—') + '</td></tr>' +
+      '<tr><th>Bills to pay</th><td class="addr">' +
+      esc((mine.filter(function (a) { return a.kind === 'invoice'; })[0] || {}).address || '—') + '</td></tr></table>' +
+      '<div class="actions" style="margin-top:12px;">' +
+      '<button class="btn primary" id="inbox-btn" onclick="onCheckInbox()"' + (info.hasApiKey ? '' : ' disabled') + '>Check inbox now</button>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;margin:0;">' +
+      '<input type="checkbox" style="width:auto;" onchange="onAutoScan(this.checked)"' + (info.autoScan ? ' checked' : '') +
+      (info.hasApiKey ? '' : ' disabled') + '> check every hour</label>' +
+      '<span style="flex:1"></span>' + keyHtml + '</div>' +
+      '<div id="key-row" class="actions' + (info.hasApiKey ? ' hidden' : '') + '">' +
+      '<input type="text" id="api-key" placeholder="sk-ant-…" style="flex:1;min-width:200px;" autocomplete="off">' +
+      '<button class="btn" onclick="onSaveApiKey()">Save key</button></div>' +
+      '<div class="small muted" style="margin-top:8px;">' + lastHtml + '</div>' +
+      '<hr class="divider"><div class="actions" style="margin-top:0;">' +
+      '<span class="small">Or upload a photo / PDF:</span>' +
+      '<select id="upload-kind" style="flex:0;min-width:120px;"><option value="receipt">Receipt</option><option value="invoice">Bill to pay</option></select>' +
+      '<input type="file" id="upload-doc" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/*" onchange="onUploadDoc()"' +
+      (info.hasApiKey ? '' : ' disabled') + ' style="flex:1;min-width:200px;"></div></div>';
+  }
+
+  function onSaveApiKey() {
+    var key = document.getElementById('api-key').value.trim();
+    run('setClaudeApiKey', key).then(function (info) {
+      app.intake = info;
+      renderDocs();
+      docsNotice(info.hasApiKey ? 'API key saved.' : 'API key removed.');
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  function onAutoScan(on) {
+    run('setAutoScan', on).then(function (info) {
+      app.intake = info;
+      renderIntakeCard();
+    }).catch(function (e) { docsNotice(e.message, true); renderIntakeCard(); });
+  }
+
+  function onCheckInbox() {
+    var btn = document.getElementById('inbox-btn');
+    btn.disabled = true; btn.textContent = 'Checking… (this can take a few minutes)';
+    run('checkInboxNow').then(function (res) {
+      app.documents = res.documents;
+      app.intake = res.intake;
+      var s = res.summary || {};
+      if (s.busy) docsNotice('A check is already running — try again in a minute.');
+      else if (s.error) docsNotice(s.error, true);
+      else docsNotice(s.processed + ' new document(s) read' + (s.errors ? ', ' + s.errors + ' couldn’t be read' : '') +
+        (s.remaining ? '. More are waiting — check again.' : '.'));
+      renderDocs();
+      autoMatch();
+    }).catch(function (e) {
+      docsNotice('Inbox check failed: ' + e.message, true);
+      renderIntakeCard();
+    });
+  }
+
+  function onUploadDoc() {
+    var input = document.getElementById('upload-doc');
+    var file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { docsNotice('That file is over 20 MB.', true); input.value = ''; return; }
+    var kind = document.getElementById('upload-kind').value;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result).split(',')[1];
+      input.disabled = true;
+      docsNotice('Reading ' + file.name + '…');
+      run('uploadDocument', file.name, file.type, b64, currentCompanyId, kind).then(function (docs) {
+        app.documents = docs;
+        renderDocs();
+        autoMatch();
+      }).catch(function (e) { docsNotice('Upload failed: ' + e.message, true); })
+        .finally(function () { input.disabled = false; input.value = ''; });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ---------------------------------------------------- documents to sort out
+  function txnOptionLabel(t) {
+    var co = t.companyId !== currentCompanyId && companyById(t.companyId) ? ' · ' + companyById(t.companyId).shortName : '';
+    return t.date + ' · ' + t.description + ' · ' + fmt(txnGross(t)) + (t.spender ? ' · ' + t.spender : '') + co;
+  }
+
+  /** Suggested matches first, then other unreceipted transactions within ±45 days. */
+  function matchOptionsHtml(doc) {
+    var taken = linkedTxns();
+    var cands = candidatesFor(doc, taken);
+    var suggested = {};
+    var html = '<option value="">Match to a transaction…</option>';
+    if (cands.length) {
+      html += '<optgroup label="Suggested">' + cands.slice(0, 6).map(function (c) {
+        suggested[c.t.hash] = true;
+        return '<option value="' + esc(c.t.hash) + '">' + esc(txnOptionLabel(c.t)) + '</option>';
+      }).join('') + '</optgroup>';
+    }
+    var ref = doc.date || doc.received;
+    var others = (doc.companyId ? companyTxns() : app.transactions).filter(function (t) {
+      return needsReceipt(t) && !taken[t.hash] && !suggested[t.hash] && Math.abs(daysBetween(ref, t.date)) <= 45;
+    }).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    if (others.length) {
+      html += '<optgroup label="Other transactions (±45 days)">' + others.map(function (t) {
+        return '<option value="' + esc(t.hash) + '">' + esc(txnOptionLabel(t)) + '</option>';
+      }).join('') + '</optgroup>';
+    }
+    return html;
+  }
+
+  function docSummaryHtml(doc) {
+    var bits = [];
+    if (doc.date) bits.push(esc(doc.date));
+    if (doc.description) bits.push(esc(doc.description));
+    if (doc.vat) bits.push('VAT ' + (doc.currency === 'GBP' ? fmt(doc.vat) : doc.vat.toFixed(2)));
+    if (doc.spender) bits.push(esc(doc.spender));
+    else if (doc.from) bits.push('from ' + esc(doc.from.replace(/<.*>/, '').trim() || doc.from));
+    return '<div class="doc-head"><span><span class="badge">' + (doc.kind === 'invoice' ? 'Bill' : 'Receipt') + '</span> ' +
+      '<b>' + esc(doc.supplier || doc.fileName || 'Unknown') + '</b> ' + docLinkHtml(doc, 'view') + '</span>' +
+      '<span class="doc-amount">' + (doc.gross ? docAmount(doc) : '') + '</span></div>' +
+      '<div class="small muted">' + bits.join(' · ') + '</div>' +
+      (!doc.companyId && doc.status === 'new' ? '<div class="small muted">Company not known yet — matching it to a payment decides.</div>' : '') +
+      (doc.flags ? '<div class="flag">⚠ ' + esc(doc.flags) + '</div>' : '') +
+      (doc.error ? '<div class="flag">⚠ ' + esc(doc.error) + '</div>' : '');
+  }
+
+  function docActionsHtml(doc) {
+    var id = esc(doc.id);
+    var moves = app.companies.filter(function (c) { return c.id !== doc.companyId; }).map(function (c) {
+      return '<button class="linklike" onclick="docUpdate(\'' + id + '\',{companyId:\'' + esc(c.id) + '\'})">Move to ' + esc(c.shortName) + '</button>';
+    }).join('');
+    if (doc.status === 'error') {
+      return '<div class="actions">' + (doc.fileId ? '<button class="btn" onclick="docRetry(\'' + id + '\')">Read again</button>' : '') +
+        '<button class="linklike danger" onclick="docUpdate(\'' + id + '\',{status:\'ignored\'})">Dismiss</button></div>';
+    }
+    return '<div class="actions"><select id="match-' + id + '">' + matchOptionsHtml(doc) + '</select>' +
+      '<button class="btn primary" onclick="docLink(\'' + id + '\')">Match</button></div>' +
+      '<div class="actions">' +
+      (doc.kind === 'invoice'
+        ? '<button class="linklike" onclick="docUpdate(\'' + id + '\',{status:\'paid\'})">Mark paid (not on a statement)</button>' +
+          '<button class="linklike" onclick="docUpdate(\'' + id + '\',{kind:\'receipt\'})">It’s a receipt</button>'
+        : '<button class="linklike" onclick="docUpdate(\'' + id + '\',{kind:\'invoice\'})">It’s a bill to pay</button>') +
+      moves +
+      '<button class="linklike danger" onclick="docUpdate(\'' + id + '\',{status:\'ignored\'})">Not a receipt / bill</button></div>';
+  }
+
+  function renderAttention() {
+    var docs = companyDocs().filter(function (d) {
+      return d.status === 'error' || (d.status === 'new' && d.kind !== 'invoice');
+    }).sort(function (a, b) { return (a.date || a.received) < (b.date || b.received) ? 1 : -1; });
+    document.getElementById('docs-attention').innerHTML = docs.length
+      ? '<div class="card"><h2>Receipts to match (' + docs.length + ')</h2>' +
+        '<p class="small muted" style="margin-top:0;">Receipts that couldn’t be matched automatically — usually because the ' +
+        'statement isn’t uploaded yet, or more than one payment has the same amount.</p>' +
+        docs.map(function (d) { return '<div class="doc-row">' + docSummaryHtml(d) + docActionsHtml(d) + '</div>'; }).join('') +
+        '</div>'
+      : '';
+  }
+
+  function renderBills() {
+    var today = new Date().toISOString().slice(0, 10);
+    var bills = companyDocs().filter(function (d) { return d.kind === 'invoice' && d.status === 'new'; })
+      .sort(function (a, b) { return (a.dueDate || a.date || '9') < (b.dueDate || b.date || '9') ? -1 : 1; });
+    var total = bills.reduce(function (s, b) { return s + (b.currency === 'GBP' ? b.gross : 0); }, 0);
+    var overdueTotal = 0;
+    var rows = bills.map(function (d) {
+      var due = '';
+      if (d.dueDate) {
+        var days = daysBetween(today, d.dueDate);
+        if (days < 0) { overdueTotal += d.currency === 'GBP' ? d.gross : 0; due = '<span class="badge warn">overdue ' + (-days) + 'd</span>'; }
+        else due = '<span class="small muted">due ' + (days === 0 ? 'today' : 'in ' + days + 'd') + ' (' + esc(d.dueDate) + ')</span>';
+      }
+      return '<div class="doc-row">' + docSummaryHtml(d) +
+        '<div class="small" style="margin-top:2px;">' + due + (d.invoiceNo ? ' <span class="muted">· invoice ' + esc(d.invoiceNo) + '</span>' : '') + '</div>' +
+        docActionsHtml(d) + '</div>';
+    }).join('');
+    document.getElementById('docs-bills').innerHTML =
+      '<div class="card"><div class="proj-head"><h2>Bills to pay</h2>' +
+      (bills.length ? '<span class="amounts">' + fmt(total) + ' outstanding' +
+        (overdueTotal ? ' · <span class="flag">' + fmt(overdueTotal) + ' overdue</span>' : '') + '</span>' : '') + '</div>' +
+      (bills.length
+        ? '<p class="small muted" style="margin-top:0;">Each bill closes itself when its payment shows up on a statement.</p>' + rows
+        : '<div class="small muted">No unpaid bills. Suppliers can send invoices to the bills address above.</div>') +
+      '</div>';
+  }
+
+  function docLink(id) {
+    var hash = document.getElementById('match-' + id).value;
+    if (!hash) { docsNotice('Pick the transaction first.', true); return; }
+    run('linkDocuments', [{ docId: id, txnHash: hash }]).then(function (res) {
+      app.documents = res.documents;
+      app.transactions = res.transactions;
+      renderAll();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  function docUpdate(id, fields) {
+    run('updateDocument', id, fields).then(function (docs) {
+      app.documents = docs;
+      renderDocs();
+      if (fields.kind || fields.companyId) autoMatch();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  function docUnlink(id) {
+    run('unlinkDocument', id).then(function (docs) {
+      app.documents = docs;
+      renderAll();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  function docRetry(id) {
+    docsNotice('Reading it again…');
+    run('retryDocument', id).then(function (docs) {
+      app.documents = docs;
+      renderDocs();
+      autoMatch();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  // ------------------------------------------------------- missing receipts
+  function monthOf(date) { return String(date || '').slice(0, 7); }
+
+  function monthLabel(ym) {
+    var p = ym.split('-');
+    return new Date(Number(p[0]), Number(p[1]) - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  }
+
+  function companyMonths() {
+    var seen = {};
+    companyTxns().forEach(function (t) { if (t.date) seen[monthOf(t.date)] = true; });
+    return Object.keys(seen).sort().reverse();
+  }
+
+  function missingReceipts(period) {
+    var linked = linkedTxns();
+    return companyTxns().filter(function (t) {
+      return needsReceipt(t) && !linked[t.hash] && t.receipt !== 'not-needed' &&
+        (!period || monthOf(t.date) === period);
+    }).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  }
+
+  function renderMissing() {
+    var months = companyMonths();
+    var period = docsUi.missingPeriod;
+    var items = missingReceipts(period);
+    var groups = {};
+    items.forEach(function (t) { (groups[t.spender || ''] = groups[t.spender || ''] || []).push(t); });
+    var names = Object.keys(groups).sort(function (a, b) { return a === '' ? 1 : b === '' ? -1 : a < b ? -1 : 1; });
+    var peopleOpts = people();
+    var html = names.map(function (name) {
+      var list = groups[name];
+      var sum = list.reduce(function (s, t) { return s + txnGross(t); }, 0);
+      var head = name
+        ? '<b>' + esc(name) + '</b> · ' + list.length + ' item(s) · ' + fmt(sum) +
+          ' <button class="btn" style="padding:3px 10px;font-size:12px;margin-left:6px;" onclick="chase(\'' + esc(name) + '\')">Email ' + esc(name) + '</button>'
+        : '<b>No spender tagged</b> · ' + list.length + ' item(s) · ' + fmt(sum) +
+          ' <span class="small muted">— pick who spent it to chase them</span>';
+      var rows = list.map(function (t) {
+        var acc = accountById(t.accountId);
+        var tag = name ? '' : '<select style="width:auto;padding:3px 6px;font-size:12px;" onchange="setSpender(\'' + esc(t.hash) + '\', this.value)">' +
+          '<option value="">who?</option>' + peopleOpts.map(function (p) { return '<option>' + esc(p) + '</option>'; }).join('') + '</select> ';
+        return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
+          '<div class="muted small">' + esc(t.projectName || '') + (acc ? ' · ' + esc(acc.name) : '') +
+          (t.chased ? ' · chased ' + esc(t.chased) : '') + '</div></td>' +
+          '<td class="num">' + fmt(txnGross(t)) + '</td>' +
+          '<td style="white-space:nowrap;">' + tag + '<button class="linklike" title="Bank fees, salaries, HMRC, subscriptions with no receipt…" onclick="noReceipt(\'' + esc(t.hash) + '\')">not needed</button></td></tr>';
+      }).join('');
+      return '<div style="margin-top:12px;">' + head + '</div><div class="table-scroll"><table>' + rows + '</table></div>';
+    }).join('');
+    document.getElementById('docs-missing').innerHTML =
+      '<div class="card"><div class="proj-head"><h2>Missing receipts (' + items.length + ')</h2>' +
+      '<select style="width:auto;padding:4px 6px;" onchange="docsUi.missingPeriod=this.value;renderMissing();">' +
+      '<option value="">All months</option>' + months.map(function (m) {
+        return '<option value="' + m + '"' + (m === period ? ' selected' : '') + '>' + esc(monthLabel(m)) + '</option>';
+      }).join('') + '</select></div>' +
+      (items.length ? html : '<div class="small muted">Every card and bank payment has a receipt. 🎉</div>') + '</div>';
+  }
+
+  function chase(name) {
+    var list = missingReceipts(docsUi.missingPeriod).filter(function (t) { return t.spender === name; });
+    if (!list.length) return;
+    var person = ((app.intake && app.intake.people) || []).filter(function (p) { return p.name === name; })[0];
+    if (!confirm('Email ' + name + (person && person.email ? ' (' + person.email + ')' : '') + ' asking for ' +
+      list.length + ' receipt(s)?\n\n' + list.map(function (t) { return t.date + '  ' + t.description + '  ' + fmt(txnGross(t)); }).join('\n'))) return;
+    run('sendReceiptChase', name, list.map(function (t) { return t.hash; }), currentCompanyId).then(function (txns) {
+      app.transactions = txns;
+      renderDocs();
+      docsNotice('Sent to ' + name + '. Their replies with photos will be picked up from the receipts address.');
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  function noReceipt(hash) {
+    run('setReceiptStatus', hash, 'not-needed').then(function (txns) {
+      app.transactions = txns;
+      renderDocs();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  function setSpender(hash, name) {
+    if (!name) return;
+    run('setTransactionSpender', hash, name).then(function (txns) {
+      app.transactions = txns;
+      renderDocs();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  // -------------------------------------------------------------- month end
+  /** Months and calendar quarters with transactions, newest first. */
+  function packPeriods() {
+    var out = [];
+    var quarters = {};
+    companyMonths().forEach(function (m) {
+      out.push({ id: m, label: monthLabel(m), from: m + '-01', to: m + '-31' });
+      var y = m.slice(0, 4), q = Math.floor((Number(m.slice(5, 7)) - 1) / 3);
+      quarters[y + '-Q' + (q + 1)] = { y: y, q: q };
+    });
+    Object.keys(quarters).sort().reverse().forEach(function (k) {
+      var y = quarters[k].y, q = quarters[k].q;
+      var m1 = ('0' + (q * 3 + 1)).slice(-2), m3 = ('0' + (q * 3 + 3)).slice(-2);
+      out.push({ id: k, label: 'Q' + (q + 1) + ' ' + y + ' (VAT quarter ' + monthLabel(y + '-' + m1).split(' ')[0].slice(0, 3) +
+        '–' + monthLabel(y + '-' + m3).split(' ')[0].slice(0, 3) + ')', from: y + '-' + m1 + '-01', to: y + '-' + m3 + '-31' });
+    });
+    return out;
+  }
+
+  function txnType(t) {
+    if (isIntercoTxn(t)) return 'Inter-company';
+    if (isIncomeTxn(t)) return 'Income';
+    if (!t.projectId) return 'Ignored (personal / transfer)';
+    return 'Expense';
+  }
+
+  /** Everything the accountant pack and on-screen summary need for a period. */
+  function packData(period) {
+    var linked = linkedTxns();
+    var txns = companyTxns().filter(function (t) { return t.date >= period.from && t.date <= period.to; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    var rows = txns.map(function (t) {
+      var doc = linked[t.hash];
+      var acc = accountById(t.accountId);
+      var status = '';
+      if (needsReceipt(t)) status = doc ? 'Receipt ✓' : (t.receipt === 'not-needed' ? 'Not needed' : 'MISSING');
+      return {
+        date: t.date, account: acc ? acc.name : (t.accountId === 'manual' ? 'Manual entry' : ''),
+        spender: t.spender || '', type: txnType(t), description: t.description,
+        supplier: doc ? doc.supplier : '', project: t.projectName || '',
+        line: t.lineName && t.lineName !== t.category ? t.lineName + (t.category ? ' (' + t.category + ')' : '') : (t.category || ''),
+        net: t.amount, vat: t.vat || 0, gross: t.gross || t.amount,
+        vatNumber: doc ? doc.vatNumber : '', receiptUrl: doc ? doc.fileUrl : '', receiptName: doc ? doc.fileName : '',
+        status: status, note: t.purpose || ''
+      };
+    });
+    var bills = companyDocs().filter(function (d) {
+      var dd = d.date || d.received;
+      return d.kind === 'invoice' && d.companyId === currentCompanyId && d.status !== 'ignored' && d.status !== 'error' &&
+        ((dd >= period.from && dd <= period.to) || d.status === 'new');
+    }).map(function (d) {
+      var t = d.txnHash ? app.transactions.filter(function (x) { return x.hash === d.txnHash; })[0] : null;
+      var acc = t ? accountById(t.accountId) : null;
+      return {
+        supplier: d.supplier, invoiceNo: d.invoiceNo, date: d.date, dueDate: d.dueDate,
+        net: d.net, vat: d.vat, gross: d.gross, vatNumber: d.vatNumber,
+        status: d.status === 'matched' ? 'Paid' : d.status === 'paid' ? 'Paid (outside these accounts)' : 'UNPAID',
+        paidBy: t ? t.date + (acc ? ' · ' + acc.name : '') : '', fileUrl: d.fileUrl
+      };
+    });
+    var inputOk = 0, inputUnsupported = 0, output = 0;
+    txns.forEach(function (t) {
+      if (isIntercoTxn(t) || !t.projectId && !isIncomeTxn(t)) return;
+      if (isIncomeTxn(t)) { output += -(t.vat || 0); return; }
+      if (!(t.vat > 0)) return;
+      var doc = linked[t.hash];
+      if (doc && doc.vatNumber) inputOk += t.vat; else inputUnsupported += t.vat;
+    });
+    var counts = { total: 0, ok: 0, missing: 0, notNeeded: 0 };
+    rows.forEach(function (r) {
+      if (!r.status) return;
+      counts.total++;
+      if (r.status === 'Receipt ✓') counts.ok++;
+      else if (r.status === 'MISSING') counts.missing++;
+      else counts.notNeeded++;
+    });
+    var r2 = function (n) { return Math.round(n * 100) / 100; };
+    var vatSummary = [
+      { label: 'Output VAT on income', amount: r2(output) },
+      { label: 'Input VAT on costs with a VAT receipt', amount: r2(inputOk) },
+      { label: 'Input VAT with no VAT receipt yet (not safe to reclaim)', amount: r2(inputUnsupported) },
+      { label: 'VAT payable (output − supported input)', amount: r2(output - inputOk) }
+    ];
+    return { rows: rows, bills: bills, vatSummary: vatSummary, counts: counts };
+  }
+
+  function renderMonthEnd() {
+    var periods = packPeriods();
+    if (!periods.length) { document.getElementById('docs-monthend').innerHTML = ''; return; }
+    if (!periods.some(function (p) { return p.id === docsUi.packPeriod; })) docsUi.packPeriod = periods[0].id;
+    var period = periods.filter(function (p) { return p.id === docsUi.packPeriod; })[0];
+    var data = packData(period);
+    var c = data.counts;
+    var pack = docsUi.pack && docsUi.pack.periodId === period.id && docsUi.pack.companyId === currentCompanyId ? docsUi.pack : null;
+    document.getElementById('docs-monthend').innerHTML =
+      '<div class="card"><div class="proj-head"><h2>Month end → accountant</h2>' +
+      '<select style="width:auto;padding:4px 6px;" onchange="docsUi.packPeriod=this.value;renderMonthEnd();">' +
+      periods.map(function (p) {
+        return '<option value="' + p.id + '"' + (p.id === period.id ? ' selected' : '') + '>' + esc(p.label) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="small" style="margin:4px 0 10px;">' + data.rows.length + ' transactions · ' + c.ok + ' with receipts · ' +
+      (c.missing ? '<span class="flag">' + c.missing + ' missing</span>' : '0 missing') + ' · ' + c.notNeeded + ' need none · ' +
+      data.bills.length + ' supplier bill(s)</div>' +
+      '<table>' + data.vatSummary.map(function (v, i) {
+        return '<tr' + (i === 3 ? ' class="total-row"' : '') + '><td>' + esc(v.label) + '</td><td class="num">' + fmt(v.amount) + '</td></tr>';
+      }).join('') + '</table>' +
+      '<div class="small muted" style="margin-top:6px;">VAT comes from the receipts where they’ve been matched, otherwise from the VAT tick-box when you reconciled.</div>' +
+      '<div class="actions" style="margin-top:12px;">' +
+      '<button class="btn primary" id="pack-btn" onclick="onBuildPack()">' + (pack ? 'Rebuild' : 'Build') + ' accountant spreadsheet</button>' +
+      (pack ? '<a href="' + esc(pack.url) + '" target="_blank" rel="noopener">Open ' + esc(pack.name) + ' ↗</a>' : '') + '</div>' +
+      (pack
+        ? '<div class="actions"><input type="text" id="acct-email" placeholder="accountant@example.com" value="' +
+          esc((app.intake && app.intake.accountantEmail) || '') + '" style="flex:1;min-width:200px;">' +
+          '<input type="text" id="acct-note" placeholder="Note for the accountant (optional)" style="flex:2;min-width:200px;">' +
+          '<button class="btn" onclick="onEmailPack()">Email to accountant</button></div>' +
+          (pack.sentTo ? '<div class="small" style="color:var(--good);">Sent to ' + esc(pack.sentTo) + ' ✓</div>' : '')
+        : '') +
+      (c.missing ? '<div class="small muted" style="margin-top:6px;">Tip: chase the missing receipts above first — the sheet marks them MISSING.</div>' : '') +
+      '</div>';
+  }
+
+  function onBuildPack() {
+    var period = packPeriods().filter(function (p) { return p.id === docsUi.packPeriod; })[0];
+    var data = packData(period);
+    var btn = document.getElementById('pack-btn');
+    btn.disabled = true; btn.textContent = 'Building…';
+    run('buildAccountantPack', currentCompanyId, period.label, data.rows, data.bills, data.vatSummary).then(function (res) {
+      docsUi.pack = { periodId: period.id, companyId: currentCompanyId, url: res.url, id: res.id, name: res.name, label: period.label };
+      renderMonthEnd();
+    }).catch(function (e) {
+      docsNotice('Could not build the spreadsheet: ' + e.message, true);
+      renderMonthEnd();
+    });
+  }
+
+  function onEmailPack() {
+    var pack = docsUi.pack;
+    var to = document.getElementById('acct-email').value.trim();
+    var note = document.getElementById('acct-note').value.trim();
+    if (!pack) return;
+    if (!confirm('Share “' + pack.name + '” and the ' + (currentCompany() ? currentCompany().shortName : '') +
+      ' receipts folder with ' + to + ', and email them the link?')) return;
+    run('emailAccountantPack', pack.id, currentCompanyId, pack.label, to, note).then(function (res) {
+      pack.sentTo = res.sentTo;
+      if (app.intake) app.intake.accountantEmail = res.sentTo;
+      renderMonthEnd();
+    }).catch(function (e) { docsNotice(e.message, true); });
+  }
+
+  // ----------------------------------------------------------- matched list
+  function renderMatched() {
+    var byHash = {};
+    app.transactions.forEach(function (t) { byHash[t.hash] = t; });
+    var docs = companyDocs().filter(function (d) { return d.status === 'matched' || d.status === 'paid' || d.status === 'ignored'; })
+      .sort(function (a, b) { return (a.date || a.received) < (b.date || b.received) ? 1 : -1; });
+    if (!docs.length) { document.getElementById('docs-matched').innerHTML = ''; return; }
+    var rows = docs.map(function (d) {
+      var t = byHash[d.txnHash];
+      var what = d.status === 'matched' && t ? esc(t.date + ' · ' + t.description + ' · ' + (t.projectName || ''))
+        : d.status === 'paid' ? 'Marked paid' : 'Not a receipt / bill';
+      var undo = d.status === 'matched'
+        ? '<button class="linklike danger" onclick="docUnlink(\'' + esc(d.id) + '\')">unmatch</button>'
+        : '<button class="linklike" onclick="docUpdate(\'' + esc(d.id) + '\',{status:\'new\'})">restore</button>';
+      return '<tr><td>' + esc(d.date || d.received) + '</td><td>' + esc(d.supplier || d.fileName) + ' ' + docLinkHtml(d, 'view') +
+        (d.flags ? '<div class="flag small">' + esc(d.flags) + '</div>' : '') + '</td>' +
+        '<td class="num">' + (d.gross ? docAmount(d) : '') + '</td><td class="small">' + what + '</td><td>' + undo + '</td></tr>';
+    }).join('');
+    document.getElementById('docs-matched').innerHTML =
+      '<div class="card"><details><summary class="small" style="cursor:pointer;color:var(--link);">' + docs.length +
+      ' filed document(s) — show</summary><div class="table-scroll" style="margin-top:8px;"><table>' +
+      '<tr><th>Date</th><th>Document</th><th class="num">Amount</th><th>Matched to</th><th></th></tr>' + rows +
+      '</table></div></details></div>';
   }
 </script>
 </body>

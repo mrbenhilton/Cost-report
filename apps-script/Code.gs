@@ -3,7 +3,7 @@
  *
  * This script is bound to a Google Sheet. All data lives in tabs of that
  * sheet (Companies, Accounts, Projects, Budget Lines, Transactions,
- * Settings), so nothing is ever lost between sessions — the spreadsheet IS
+ * Documents, Settings), so nothing is ever lost between sessions — the spreadsheet IS
  * the database.
  *
  * Columns are looked up by header name, so extra columns can be added to
@@ -65,7 +65,7 @@ var LINE_HEADERS = ['ID', 'Project ID', 'Section', 'Item', 'Description', 'Qty',
 var TXN_HEADERS = [
   'Hash', 'Date', 'Description', 'Amount', 'Gross', 'VAT', 'Project ID',
   'Project Name', 'Line ID', 'Line Name', 'Category', 'Purpose', 'Statement', 'Recorded',
-  'Account ID', 'Company ID', 'Spender'
+  'Account ID', 'Company ID', 'Spender', 'Receipt', 'Chased'
 ];
 var SETTINGS_HEADERS = ['Key', 'Value'];
 
@@ -147,7 +147,9 @@ function getAppData() {
     projects: listProjects_(),
     budgetLines: listLines_(),
     transactions: listTransactions_(),
-    settings: getSettings_()
+    settings: getSettings_(),
+    documents: listDocuments_(),
+    intake: getIntakeInfo_()
   };
 }
 
@@ -406,7 +408,10 @@ function listTransactions_() {
       recorded: formatDate_(v[d.col['Recorded']]),
       accountId: String(v[d.col['Account ID']] || '') || DEFAULT_ACCOUNT_ID,
       companyId: String(v[d.col['Company ID']] || '') || DEFAULT_COMPANY_ID,
-      spender: String(v[d.col['Spender']] || '')
+      spender: String(v[d.col['Spender']] || ''),
+      // 'not-needed' when no receipt is expected (bank fees, salaries, HMRC…)
+      receipt: String(v[d.col['Receipt']] || ''),
+      chased: formatDate_(v[d.col['Chased']])
     };
   });
 }
@@ -416,7 +421,7 @@ function listTransactions_() {
  * (so re-uploading the same statement never creates duplicates).
  * Each txn: {hash, date, description, amount, projectId, projectName,
  *            lineId, lineName, category, purpose, statement,
- *            accountId, companyId, spender}
+ *            accountId, companyId, spender, receipt}
  */
 function saveTransactions(txns) {
   if (!txns || !txns.length) return { saved: 0, duplicates: 0 };
@@ -442,7 +447,8 @@ function saveTransactions(txns) {
         'Statement': String(t.statement || ''), 'Recorded': now,
         'Account ID': String(t.accountId || '') || DEFAULT_ACCOUNT_ID,
         'Company ID': String(t.companyId || '') || DEFAULT_COMPANY_ID,
-        'Spender': String(t.spender || '')
+        'Spender': String(t.spender || ''),
+        'Receipt': String(t.receipt || '')
       }));
     });
     if (rows.length) {
