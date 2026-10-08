@@ -30,14 +30,13 @@
     --good:           #1d6b2f;
     --critical:       #c0271c;
     --credit:         #1d6b2f;
-    --shadow:         3px 3px 0 #111;
   }
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     color: var(--ink);
-    font: 14px/1.55 "Courier Prime", "American Typewriter", "Courier New", Courier, monospace;
+    font: 16px/1.55 "Courier Prime", "American Typewriter", "Courier New", Courier, monospace;
   }
   /* graph paper on the whole page, however long it gets */
   html {
@@ -63,32 +62,32 @@
   header {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     margin: 0 -32px; padding: 12px 32px;
-    background: var(--ink); color: #fff; border-bottom: 2px solid var(--ink);
+    background: var(--ink); color: #fff; border-bottom: 1px solid var(--ink);
   }
   @media (max-width: 700px) { header { margin: 0 -16px; padding: 12px 16px; } }
   header h1 {
-    font-size: 20px; margin: 0; flex: 1; letter-spacing: 0.04em; text-transform: uppercase;
+    font-size: 24px; margin: 0; flex: 1; letter-spacing: 0.04em; text-transform: uppercase;
   }
   header h1::before { content: "■ "; color: var(--highlight); }
   header label { color: #fff !important; }
-  header select { background: #fff; color: var(--ink); border: 2px solid #fff !important; }
-  header a { color: var(--ink); background: var(--highlight); padding: 3px 8px; text-decoration: none; font-size: 13px; font-weight: 700; }
+  header select { background: #fff; color: var(--ink); border: 1px solid #fff !important; }
+  header a { color: var(--ink); background: var(--highlight); padding: 3px 8px; text-decoration: none; font-size: 15px; font-weight: 700; }
   header a:hover { background: #fff; }
 
   /* Tabs */
-  nav { display: flex; gap: 0; flex-wrap: wrap; margin: 18px 0 20px; border-bottom: 2px solid var(--ink); }
+  nav { display: flex; gap: 0; flex-wrap: wrap; margin: 18px 0 20px; border-bottom: 1px solid var(--ink); }
   nav button {
-    background: var(--surface); border: 2px solid var(--ink); border-bottom: none; margin-right: -2px;
+    background: var(--surface); border: 1px solid var(--ink); border-bottom: none; margin-right: -1px;
     padding: 9px 18px; font: inherit; font-weight: 700; color: var(--ink); cursor: pointer;
-    text-transform: uppercase; letter-spacing: 0.04em; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.04em; font-size: 15px;
   }
   nav button.active { background: var(--highlight); }
   nav button:hover:not(.active) { background: var(--highlight-soft); }
 
   /* Panels: solid black border, black title bar */
   .card {
-    background: var(--surface); border: 2px solid var(--border); border-radius: 0;
-    padding: 16px; margin-bottom: 18px; box-shadow: var(--shadow);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 0;
+    padding: 16px; margin-bottom: 18px;
   }
   .card > h2:first-child,
   .card > .proj-head:first-child {
@@ -101,114 +100,119 @@
   .card > .proj-head:first-child .flag { color: var(--highlight); }
   .card > .proj-head:first-child select { background: #fff; border-color: #fff; }
   h2, .card > .proj-head:first-child h3 {
-    font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-size: 16px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.06em;
   }
-  h3 { font-size: 15px; margin: 0; }
+  h3 { font-size: 17px; margin: 0; }
+  .card > .proj-head:first-child h2,
+  .card > .proj-head:first-child h3 { margin: 0; }
   .muted { color: var(--muted); }
-  .small { font-size: 13px; }
+  .small { font-size: 15px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .grow { flex: 1; min-width: 140px; }
+  .card-actions { margin-top: 8px; }
 
   /* Wide screens: project cards side by side; one-at-a-time screens stay readable */
   @media (min-width: 1100px) {
-    #project-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 0 18px; align-items: start; }
+    /* every project box the same width and height, buttons along the bottom */
+    #project-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); grid-auto-rows: 1fr; gap: 18px; }
+    #project-list > .card { margin-bottom: 0; display: flex; flex-direction: column; }
+    #project-list > .card .card-actions { margin-top: auto; padding-top: 10px; }
     #tab-review { max-width: 1100px; }
   }
 
-  label { display: block; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+  label { display: block; font-size: 14px; font-weight: 700; color: var(--ink); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
   input[type=text], input[type=number], input[type=date], select, textarea {
     width: 100%; padding: 8px 10px; font: inherit; color: var(--ink);
-    background: var(--surface); border: 2px solid var(--ink); border-radius: 0;
+    background: var(--surface); border: 1px solid var(--ink); border-radius: 0;
   }
   input:focus, select:focus, textarea:focus { outline: none; background: #fffbd6; box-shadow: 0 0 0 3px var(--highlight); }
   textarea { resize: vertical; }
-  input[type=file] { font-size: 13px; }
+  input[type=file] { font-size: 15px; }
 
   button.btn {
     font: inherit; font-weight: 700; padding: 8px 16px; border-radius: 0;
-    border: 2px solid var(--ink); background: var(--surface); color: var(--ink); cursor: pointer;
-    box-shadow: 2px 2px 0 var(--ink); text-transform: uppercase; letter-spacing: 0.03em; font-size: 13px;
+    border: 1px solid var(--ink); background: var(--surface); color: var(--ink); cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.03em; font-size: 15px;
   }
   button.btn:hover:not(:disabled) { background: var(--highlight-soft); }
-  button.btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: none; }
   button.btn.primary { background: var(--highlight); }
   button.btn.primary:hover:not(:disabled) { background: #ffdf1a; }
   button.btn:disabled { opacity: 0.45; cursor: default; }
   button.linklike {
-    background: none; border: none; padding: 2px 4px; font: inherit; font-size: 13px;
+    background: none; border: none; padding: 2px 4px; font: inherit; font-size: 15px;
     color: var(--ink); cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
   }
   button.linklike:hover { background: var(--highlight); }
   button.danger { color: var(--critical); }
 
   /* Budget meter */
-  .meter { height: 14px; border: 2px solid var(--ink); background: var(--surface); overflow: hidden; margin: 8px 0 4px; }
-  .meter .fill { height: 100%; background: var(--highlight); border-right: 2px solid var(--ink); }
+  .meter { height: 14px; border: 1px solid var(--ink); background: var(--surface); overflow: hidden; margin: 8px 0 4px; }
+  .meter .fill { height: 100%; background: var(--highlight); border-right: 1px solid var(--ink); }
   .meter .fill.over { background: var(--critical); }
-  .meter-label { font-size: 13px; color: var(--ink-2); }
+  .meter-label { font-size: 15px; color: var(--ink-2); }
   .meter-label .over-text { color: var(--critical); font-weight: 700; }
 
   /* Stat tiles: black label bar, highlighted figure */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
-  .tile { background: var(--surface); border: 2px solid var(--ink); padding: 0 14px 12px; box-shadow: var(--shadow); }
+  .tile { background: var(--surface); border: 1px solid var(--ink); padding: 0 14px 12px; }
   .tile .t-label {
     margin: 0 -14px 10px; padding: 5px 14px; background: var(--ink); color: #fff;
-    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
   }
   .tile .t-value {
-    display: inline; font-size: 26px; font-weight: 700; padding: 0 4px;
+    display: inline; font-size: 30px; font-weight: 700; padding: 0 4px;
     background: linear-gradient(transparent 55%, var(--highlight) 55%, var(--highlight) 92%, transparent 92%);
   }
   .tile .t-value.negative { color: var(--critical); }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
   th {
     text-align: left; color: var(--ink); font-weight: 700; padding: 6px 8px;
-    border-bottom: 2px solid var(--ink); text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--ink); text-transform: uppercase; font-size: 13px; letter-spacing: 0.05em;
   }
   td { padding: 6px 8px; border-bottom: 1px dashed var(--hairline); vertical-align: top; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .table-scroll { overflow-x: auto; }
 
   /* Reconciliation table */
-  tr.section-row td { font-weight: 700; padding-top: 14px; border-bottom: 2px solid var(--ink); text-transform: uppercase; letter-spacing: 0.03em; }
+  tr.section-row td { font-weight: 700; padding-top: 14px; border-bottom: 1px solid var(--ink); text-transform: uppercase; letter-spacing: 0.03em; }
   tr.subtotal-row td { font-weight: 700; color: var(--ink); background: #f3f2ea; }
-  tr.total-row td { font-weight: 700; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); background: var(--highlight-soft); }
+  tr.total-row td { font-weight: 700; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); background: var(--highlight-soft); }
   td.over-num { color: var(--critical); font-weight: 700; }
   td.item-cell .small { color: var(--muted); }
 
   /* Budget editor table */
-  #budget-lines-table input[type=text] { padding: 5px 8px; font-size: 13px; }
-  #budget-lines-table input[type=number] { padding: 5px 8px; font-size: 13px; text-align: right; }
+  #budget-lines-table input[type=text] { padding: 5px 8px; font-size: 15px; }
+  #budget-lines-table input[type=number] { padding: 5px 8px; font-size: 15px; text-align: right; }
   #budget-lines-table td { padding: 3px 4px; border-bottom: none; }
   #budget-lines-table th { padding: 4px; }
 
   /* Review card */
-  .progress-track { height: 12px; border: 2px solid var(--ink); background: var(--surface); margin: 8px 0 16px; }
+  .progress-track { height: 12px; border: 1px solid var(--ink); background: var(--surface); margin: 8px 0 16px; }
   .progress-fill { height: 100%; background: var(--highlight); transition: width .2s; }
   .txn-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .txn-amount {
-    font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 4px;
+    font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 4px;
     background: linear-gradient(transparent 55%, var(--highlight) 55%, var(--highlight) 92%, transparent 92%);
   }
   .txn-amount.credit { color: var(--credit); }
-  .txn-desc { font-size: 17px; font-weight: 700; margin: 6px 0 14px; word-break: break-word; }
+  .txn-desc { font-size: 20px; font-weight: 700; margin: 6px 0 14px; word-break: break-word; }
 
   .notice {
-    border: 2px solid var(--ink); border-left: 10px solid var(--highlight); padding: 8px 12px;
-    background: var(--surface); margin: 10px 0; font-size: 13px; color: var(--ink); box-shadow: 2px 2px 0 var(--ink);
+    border: 1px solid var(--ink); border-left: 8px solid var(--highlight); padding: 8px 12px;
+    background: var(--surface); margin: 10px 0; font-size: 15px; color: var(--ink);
   }
   .error-banner { border-left-color: var(--critical); }
   .hidden { display: none !important; }
-  .divider { border: none; border-top: 2px dashed var(--ink); margin: 14px 0; opacity: 0.35; }
+  .divider { border: none; border-top: 1px dashed var(--ink); margin: 14px 0; opacity: 0.35; }
   #loading { text-align: center; color: var(--ink); padding: 60px 0; font-weight: 700; }
   .proj-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .amounts { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .amounts { font-size: 15px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   details > summary { cursor: pointer; }
 
   /* Receipts & bills */
   .badge {
-    display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; border: 2px solid var(--ink);
+    display: inline-block; font-size: 13px; font-weight: 700; padding: 0 6px; border: 1px solid var(--ink);
     background: var(--highlight); color: var(--ink); vertical-align: 1px; text-transform: uppercase; letter-spacing: 0.04em;
   }
   .badge.warn { background: var(--surface); border-color: var(--critical); color: var(--critical); }
@@ -216,11 +220,11 @@
   .doc-row:first-of-type { border-top: none; }
   .doc-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
   .doc-amount { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .flag { color: var(--critical); font-size: 13px; }
-  .addr { font-size: 13px; user-select: all; font-weight: 700; background: var(--highlight-soft); padding: 0 4px; }
+  .flag { color: var(--critical); font-size: 15px; }
+  .addr { font-size: 15px; user-select: all; font-weight: 700; background: var(--highlight-soft); padding: 0 4px; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
-  .actions select { width: auto; flex: 1; min-width: 200px; padding: 5px 8px; font-size: 13px; }
-  .actions .btn { padding: 5px 12px; font-size: 12px; }
+  .actions select { width: auto; flex: 1; min-width: 200px; padding: 5px 8px; font-size: 15px; }
+  .actions .btn { padding: 5px 12px; font-size: 14px; }
   @media (min-width: 1300px) {
     /* receipts tab: work lists side by side */
     #tab-docs:not(.hidden) { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; align-items: start; }
@@ -399,15 +403,15 @@
         <div class="grow"><label for="map-spender">Spender / cardmember column (optional)</label><select id="map-spender"></select></div>
       </div>
       <div class="row" style="margin-top:10px; align-items:center;">
-        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:15px; margin:0;">
           <input type="checkbox" id="map-skip-income" style="width:auto;">
           Skip incoming payments (don’t review income)
         </label>
-        <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+        <label id="map-skip-transfers-wrap" class="hidden" style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:15px; margin:0;">
           <input type="checkbox" id="map-skip-transfers" checked style="width:auto;">
           Skip <span id="map-transfers-count">0</span> internal transfers (pots / savings / card repayments)
         </label>
-        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:15px; margin:0;">
           <input type="checkbox" id="map-has-header" checked style="width:auto;" onchange="renderMapping()">
           First row is column headings
         </label>
@@ -433,7 +437,7 @@
         <div class="txn-desc" id="rv-desc"></div>
         <div class="small muted hidden" id="rv-note" style="margin:-8px 0 14px;"></div>
         <div class="row" style="align-items:center; margin:-4px 0 12px;">
-          <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:13px; margin:0;">
+          <label style="display:flex; align-items:center; gap:6px; font-weight:400; font-size:15px; margin:0;">
             <input type="checkbox" id="rv-vat" style="width:auto;" onchange="onVatToggle()">
             Amount includes VAT
           </label>
@@ -1147,7 +1151,7 @@
         '<div class="small muted" style="margin-top:4px;">' +
         (lineCount ? lineCount + ' budget lines' : 'No budget lines (manual project)') +
         (p.version ? ' · ' + esc(p.version) : '') + '</div>' +
-        '<div style="margin-top:8px;">' +
+        '<div class="card-actions">' +
         '<button class="linklike" onclick="uploadNewVersion(\'' + p.id + '\')">Upload new budget version</button>' +
         '<button class="linklike" onclick="editProject(\'' + p.id + '\')">Edit</button>' +
         '<button class="linklike danger" onclick="removeProject(\'' + p.id + '\')">Delete</button>' +
@@ -2336,7 +2340,7 @@
       '<div><label>Date</label><input type="date" id="mx-date" value="' + today + '"></div>' +
       '<div class="grow" style="flex:2;"><label>Description</label><input type="text" id="mx-desc" placeholder="e.g. Director days — paid via payroll"></div>' +
       '<div class="grow"><label>Amount</label><input type="number" id="mx-amount" min="0" step="0.01" placeholder="0.00"></div>' +
-      '<div><label>&nbsp;</label><label style="display:flex; align-items:center; gap:5px; font-weight:400; font-size:13px; padding:9px 0;">' +
+      '<div><label>&nbsp;</label><label style="display:flex; align-items:center; gap:5px; font-weight:400; font-size:15px; padding:9px 0;">' +
       '<input type="checkbox" id="mx-vat" style="width:auto;"> includes VAT at ' +
       '<input type="number" id="mx-vat-rate" min="0" max="100" step="0.5" value="' + defaultVatRate() + '" style="width:65px; padding:4px 6px;"> %</label></div>' +
       '</div><div class="row" style="margin-top:10px;">' + lineField +
@@ -2663,7 +2667,7 @@
       esc((mine.filter(function (a) { return a.kind === 'invoice'; })[0] || {}).address || '—') + '</td></tr></table>' +
       '<div class="actions" style="margin-top:12px;">' +
       '<button class="btn primary" id="inbox-btn" onclick="onCheckInbox()"' + (info.hasApiKey ? '' : ' disabled') + '>Check inbox now</button>' +
-      '<label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;margin:0;">' +
+      '<label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:15px;margin:0;">' +
       '<input type="checkbox" style="width:auto;" onchange="onAutoScan(this.checked)"' + (info.autoScan ? ' checked' : '') +
       (info.hasApiKey ? '' : ' disabled') + '> check every hour</label>' +
       '<span style="flex:1"></span>' + keyHtml + '</div>' +
@@ -2909,12 +2913,12 @@
       var sum = list.reduce(function (s, t) { return s + txnGross(t); }, 0);
       var head = name
         ? '<b>' + esc(name) + '</b> · ' + list.length + ' item(s) · ' + fmt(sum) +
-          ' <button class="btn" style="padding:3px 10px;font-size:12px;margin-left:6px;" onclick="chase(\'' + esc(name) + '\')">Email ' + esc(name) + '</button>'
+          ' <button class="btn" style="padding:3px 10px;font-size:14px;margin-left:6px;" onclick="chase(\'' + esc(name) + '\')">Email ' + esc(name) + '</button>'
         : '<b>No spender tagged</b> · ' + list.length + ' item(s) · ' + fmt(sum) +
           ' <span class="small muted">— pick who spent it to chase them</span>';
       var rows = list.map(function (t) {
         var acc = accountById(t.accountId);
-        var tag = name ? '' : '<select style="width:auto;padding:3px 6px;font-size:12px;" onchange="setSpender(\'' + esc(t.hash) + '\', this.value)">' +
+        var tag = name ? '' : '<select style="width:auto;padding:3px 6px;font-size:14px;" onchange="setSpender(\'' + esc(t.hash) + '\', this.value)">' +
           '<option value="">who?</option>' + peopleOpts.map(function (p) { return '<option>' + esc(p) + '</option>'; }).join('') + '</select> ';
         return '<tr><td>' + esc(t.date) + '</td><td>' + esc(t.description) +
           '<div class="muted small">' + esc(t.projectName || '') + (acc ? ' · ' + esc(acc.name) : '') +
