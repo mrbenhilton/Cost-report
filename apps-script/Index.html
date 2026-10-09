@@ -499,6 +499,7 @@
         </div>
         <hr class="divider">
         <div class="row">
+          <button class="btn" id="rv-back" onclick="backReview()">← Back</button>
           <button class="btn primary" id="rv-save" onclick="saveCurrentTxn()">Save &amp; next</button>
           <button class="btn" id="rv-skip" onclick="skipCurrentTxn()">Skip for now</button>
           <span class="small muted" style="align-self:center;">Skipped items will be asked again next time you upload this statement.</span>
@@ -511,6 +512,7 @@
       <h2>Statement finished 🎉</h2>
       <p id="review-summary"></p>
       <div class="row">
+        <button class="btn" onclick="backReview()">← Back to last transaction</button>
         <button class="btn primary" onclick="showTab('report')">View cost report</button>
         <button class="btn" onclick="resetReview()">Upload another statement</button>
       </div>
@@ -1700,7 +1702,11 @@
     var total = review.queue.length;
     document.getElementById('review-progress-text').textContent =
       'Transaction ' + (review.idx + 1) + ' of ' + total +
-      (review.duplicates ? ' · ' + review.duplicates + ' already recorded' : '');
+      (review.duplicates ? ' · ' + review.duplicates + ' already recorded' : '') +
+      (t.outcome === 'saved' ? ' · saved — change anything and press Update to replace it' : '') +
+      (t.outcome === 'skipped' ? ' · skipped earlier' : '');
+    document.getElementById('rv-back').disabled = review.idx === 0;
+    document.getElementById('rv-save').textContent = t.outcome === 'saved' ? 'Update & next' : 'Save & next';
     document.getElementById('review-progress-fill').style.width =
       (review.idx / total * 100).toFixed(1) + '%';
 
@@ -1753,7 +1759,61 @@
       }
       updateIncomeRemaining();
     }
+    if (t.saved) restoreSavedAnswers(t);
     document.getElementById('rv-purpose').focus();
+  }
+
+  /** Going back to a card that was already saved: show the answers that were given. */
+  function restoreSavedAnswers(t) {
+    var first = t.saved[0];
+    document.getElementById('rv-purpose').value = first.purpose || '';
+    var net = 0, vat = 0;
+    t.saved.forEach(function (x) { net += Math.abs(x.amount); vat += Math.abs(x.vat || 0); });
+    if (vat && net) {
+      document.getElementById('rv-vat').checked = true;
+      document.getElementById('rv-vat-rate').value = String(Math.round(vat / net * 200) / 2);
+    }
+    if (t.amount < 0) {
+      onVatToggle();   // rebuilds the split for the ex-VAT total; then refill it
+      document.getElementById('rv-income-rows').innerHTML = '';
+      t.saved.forEach(function (x) {
+        addIncomeSplitRow(Math.abs(x.amount));
+        var sels = document.querySelectorAll('#rv-income-rows .is-proj');
+        sels[sels.length - 1].value = x.projectId || (x.category === INTERCO_CATEGORY ? INTERCO : NO_PROJECT);
+      });
+      updateIncomeRemaining();
+      return;
+    }
+    var sel = document.getElementById('rv-spender');
+    if (first.spender && ![].some.call(sel.options, function (o) { return o.value === first.spender; })) {
+      sel.insertAdjacentHTML('beforeend', '<option value="' + esc(first.spender) + '">' + esc(first.spender) + '</option>');
+    }
+    sel.value = first.spender || '';
+    var proj = document.getElementById('rv-project');
+    proj.value = first.projectId || (first.category === INTERCO_CATEGORY ? INTERCO : NO_PROJECT);
+    onReviewProjectChange();
+    var line = document.getElementById('rv-line');
+    if (!document.getElementById('rv-line-wrap').classList.contains('hidden')) {
+      line.value = first.lineId || OVERAGE;
+      onReviewLineChange();
+    }
+    if (first.category !== INTERCO_CATEGORY) document.getElementById('rv-category').value = first.lineId ? '' : (first.category || '');
+    onVatToggle();
+  }
+
+  /** Previous card; from the finished screen, the last one. */
+  function backReview() {
+    if (!review.queue.length) return;
+    if (!document.getElementById('review-step-done').classList.contains('hidden')) {
+      document.getElementById('review-step-done').classList.add('hidden');
+      document.getElementById('review-step-cards').classList.remove('hidden');
+      review.idx = review.queue.length - 1;
+    } else if (review.idx > 0) {
+      review.idx--;
+    } else {
+      return;
+    }
+    renderReviewCard();
   }
 
   /** Spender picker: prefilled from the statement's cardmember, else who spent here last time. */
@@ -2004,24 +2064,47 @@
       companyId: t.companyId,
       spender: document.getElementById('rv-spender').value
     };
+    commitCard(t, [txn]);
+  }
+
+  /**
+   * Saves a card's transaction(s). If the card was saved before (you went
+   * back to change it), the earlier rows are removed first so nothing is
+   * recorded twice.
+   */
+  function commitCard(t, txns) {
     var saveBtn = document.getElementById('rv-save');
     var skipBtn = document.getElementById('rv-skip');
-    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
-    run('saveTransactions', [txn]).then(function () {
-      app.transactions.push(txn);
-      review.saved++;
+    var backBtn = document.getElementById('rv-back');
+    saveBtn.disabled = true; skipBtn.disabled = true; backBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    var replacing = (t.saved || []).map(function (x) { return x.hash; });
+    var chain = Promise.resolve();
+    replacing.forEach(function (h) { chain = chain.then(function () { return run('deleteTransaction', h); }); });
+    chain.then(function () { return run('saveTransactions', txns); }).then(function () {
+      app.transactions = app.transactions.filter(function (x) { return replacing.indexOf(x.hash) === -1; });
+      txns.forEach(function (x) { app.transactions.push(x); });
+      if (t.outcome !== 'saved') {
+        review.saved++;
+        if (t.outcome === 'skipped') review.skipped--;
+      }
+      t.outcome = 'saved';
+      t.saved = txns;
       advanceReview();
     }).catch(function (e) {
       var el = document.getElementById('rv-error');
       el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
       el.classList.remove('hidden');
     }).finally(function () {
-      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
+      saveBtn.disabled = false; skipBtn.disabled = false; backBtn.disabled = review.idx === 0;
+      saveBtn.textContent = t.outcome === 'saved' ? 'Update & next' : 'Save & next';
     });
   }
 
+  /** Skipping a card you'd already saved leaves it saved and just moves on. */
   function skipCurrentTxn() {
-    review.skipped++;
+    var t = review.queue[review.idx];
+    if (!t.outcome) { review.skipped++; t.outcome = 'skipped'; }
     advanceReview();
   }
 
@@ -2055,20 +2138,7 @@
         accountId: t.accountId, companyId: t.companyId, spender: ''
       };
     });
-    var saveBtn = document.getElementById('rv-save');
-    var skipBtn = document.getElementById('rv-skip');
-    saveBtn.disabled = true; skipBtn.disabled = true; saveBtn.textContent = 'Saving…';
-    run('saveTransactions', txns).then(function () {
-      txns.forEach(function (x) { app.transactions.push(x); });
-      review.saved++;
-      advanceReview();
-    }).catch(function (e) {
-      var el = document.getElementById('rv-error');
-      el.textContent = 'Could not save — ' + (e && e.message ? e.message : e) + '. Try again.';
-      el.classList.remove('hidden');
-    }).finally(function () {
-      saveBtn.disabled = false; skipBtn.disabled = false; saveBtn.textContent = 'Save & next';
-    });
+    commitCard(t, txns);
   }
 
   function advanceReview() {
